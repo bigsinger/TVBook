@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <!-- 适用于 Android 10+（仅限外部存储访问） -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION"/>
+
+    <!-- 适用于 Android 11+（需要 MANAGE_EXTERNAL_STORAGE 但不建议） -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+
+    <!-- 有些在线H5绘本为http格式的，需要开启usesCleartextTraffic -->
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true"
+        android:supportsRtl="true">
+        <activity
+            android:name=".view.PlayBaseActivity"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".view.PlayAudioActivity"
+            android:screenOrientation="landscape" />
+
+        <activity
+            android:name=".view.PlayH5Activity"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".view.PlayHuibenActivity"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".view.MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

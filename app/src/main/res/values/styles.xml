@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="TvButton">
+        <item name="android:background">@drawable/tv_button</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">20sp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:minHeight">54dp</item>
+        <item name="android:minWidth">140dp</item>
+        <item name="android:layout_margin">6dp</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <style name="TvSmallButton">
+        <item name="android:background">@drawable/tv_small_button</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:minHeight">54dp</item>
+        <item name="android:minWidth">44dp</item>
+        <item name="android:layout_margin">6dp</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+
+    <style name="TvOverlayButton">
+        <item name="android:background">@drawable/tv_overlay_button</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:minHeight">22dp</item>
+        <item name="android:minWidth">44dp</item>
+        <item name="android:layout_margin">1dp</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+    </style>
+</resources>

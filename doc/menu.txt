@@ -1,0 +1,67 @@
+{
+"menu": [{
+		"name": "huiben",
+		"type": "audio_image"
+	},
+	{
+		"name": "manhua",
+		"type": "audio_image"
+	},
+	{
+		"name": "gushi",
+		"type": "audio",
+		"submenu": [{
+				"name": "100shou"
+			},
+			{
+				"name": "200shou"
+			},
+			{
+				"name": "300shou"
+			}
+		]
+	},
+	{
+		"name": "gequ",
+		"type": "audio",
+		"submenu": [{
+				"name": "80niandai"
+			},
+			{
+				"name": "90niandai"
+			},
+			{
+				"name": "liuxing"
+			}
+		]
+	},
+	{
+		"name": "xiaoshuo",
+		"type": "audio",
+		"submenu": [{
+				"name": "baishe"
+			},
+			{
+				"name": "sanguo"
+			},
+			{
+				"name": "xiyou"
+			}
+		]
+	},
+	{
+		"name": "xiqu",
+		"type": "audio",
+		"submenu": [{
+				"name": "xiaoerhei"
+			},
+			{
+				"name": "muguiying"
+			},
+			{
+				"name": "huamulan"
+			}
+		]
+	}
+]
+}

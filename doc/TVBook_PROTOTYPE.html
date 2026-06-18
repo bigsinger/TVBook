@@ -1,0 +1,2025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TVBook · 电视绘本</title>
+    <style>
+        /* ========== 全局重置 & 基础 ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0b0b0b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: "PingFang SC", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+            user-select: none;
+            padding: 20px;
+        }
+
+        .tv-screen {
+            position: relative;
+            width: 1280px;
+            max-width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #0d0d0d;
+            border-radius: 28px;
+            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.9), 0 0 0 2px #2a2a2a inset;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .tv-screen-inner {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: #111;
+        }
+
+        .key-hint {
+            background: #1e1e1e;
+            color: #888;
+            font-size: 13px;
+            padding: 8px 24px;
+            border-top: 1px solid #2a2a2a;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px 32px;
+            letter-spacing: 0.3px;
+            font-weight: 300;
+        }
+        .key-hint kbd {
+            background: #2c2c2c;
+            color: #ddd;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            border: 1px solid #3a3a3a;
+            font-family: inherit;
+        }
+        .key-hint span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .page {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            background: #111;
+        }
+        .page.active {
+            display: flex;
+        }
+
+        /* ========== 主界面 ========== */
+        #home {
+            background: #141414;
+            flex-direction: row;
+            padding: 28px 32px 32px 32px;
+            gap: 0;
+        }
+        .home-left {
+            width: 260px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #2a2a2a;
+            padding-right: 20px;
+        }
+        .home-left .app-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #f0c040;
+            letter-spacing: 2px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #2a2a2a;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .home-left .app-title small {
+            font-size: 16px;
+            font-weight: 400;
+            color: #777;
+            letter-spacing: 0;
+        }
+
+        .menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .menu-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        .menu-list::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        .menu-list::-webkit-scrollbar-thumb {
+            background: #3a3a3a;
+            border-radius: 4px;
+        }
+
+        .menu-item {
+            padding: 12px 16px;
+            font-size: 24px;
+            font-weight: 500;
+            color: #aaa;
+            border-radius: 10px;
+            background: transparent;
+            transition: all 0.1s ease;
+            cursor: default;
+            border: 2px solid transparent;
+            line-height: 1.2;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .menu-item .icon {
+            margin-right: 4px;
+            opacity: 0.6;
+        }
+        .menu-item .arrow {
+            margin-left: auto;
+            font-size: 18px;
+            color: #555;
+        }
+        .menu-item .indent {
+            width: 28px;
+            flex-shrink: 0;
+        }
+        .menu-item.focused {
+            background: #2a2a2a;
+            color: #fff;
+            border-color: #f0c040;
+            box-shadow: 0 0 30px rgba(240, 192, 64, 0.08);
+        }
+        .menu-item.focused .icon {
+            opacity: 1;
+        }
+        .menu-item.sub-item {
+            font-size: 20px;
+            padding-left: 44px;
+            color: #999;
+        }
+        .menu-item.sub-item.focused {
+            color: #fff;
+        }
+        .menu-item .badge {
+            font-size: 16px;
+            font-weight: 400;
+            color: #f0c040;
+            background: rgba(240, 192, 64, 0.15);
+            padding: 0 12px;
+            border-radius: 20px;
+            margin-left: 6px;
+        }
+
+        .home-center {
+            flex: 1;
+            padding: 0 28px 0 28px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .home-center .section-title {
+            font-size: 22px;
+            color: #888;
+            font-weight: 400;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #222;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .home-center .section-title .count {
+            font-size: 16px;
+            color: #555;
+        }
+        .content-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+        .content-grid::-webkit-scrollbar {
+            width: 4px;
+        }
+        .content-grid::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        .content-grid::-webkit-scrollbar-thumb {
+            background: #3a3a3a;
+            border-radius: 4px;
+        }
+        .content-item {
+            padding: 14px 20px;
+            font-size: 24px;
+            color: #bbb;
+            border-radius: 10px;
+            background: transparent;
+            border: 2px solid transparent;
+            transition: all 0.1s ease;
+            cursor: default;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            line-height: 1.2;
+        }
+        .content-item .tag {
+            font-size: 16px;
+            color: #666;
+            background: #1e1e1e;
+            padding: 2px 14px;
+            border-radius: 20px;
+            margin-left: auto;
+        }
+        .content-item .tag.audio-tag {
+            color: #6ab0f7;
+        }
+        .content-item .tag.book-tag {
+            color: #f0c040;
+        }
+        .content-item.focused {
+            background: #252525;
+            color: #fff;
+            border-color: #f0c040;
+            box-shadow: 0 0 24px rgba(240, 192, 64, 0.06);
+        }
+        .content-item .thumb {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .content-item .info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
+        }
+        .content-item .info .sub {
+            font-size: 16px;
+            color: #777;
+        }
+        .content-item .info .sub .highlight {
+            color: #f0c040;
+        }
+
+        .home-right {
+            width: 200px;
+            flex-shrink: 0;
+            padding-left: 24px;
+            border-left: 1px solid #2a2a2a;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            font-size: 18px;
+            color: #777;
+        }
+        .home-right .status-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .home-right .status-item .label {
+            font-size: 14px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .home-right .status-item .value {
+            font-size: 20px;
+            color: #ccc;
+            font-weight: 400;
+            word-break: break-all;
+        }
+        .home-right .status-item .value .ok {
+            color: #5cb85c;
+        }
+        .home-right .status-divider {
+            border-top: 1px solid #222;
+            margin: 4px 0;
+        }
+
+        /* ========== 播放器通用 ========== */
+        .player-page {
+            background: #000;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        .player-content {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0a;
+        }
+        .player-content .artwork {
+            width: 92%;
+            height: 92%;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 140px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.15);
+            position: relative;
+            box-shadow: 0 8px 60px rgba(0, 0, 0, 0.6);
+            background-size: cover;
+            background-position: center;
+            background: radial-gradient(circle at 30% 40%, #2a3a5a, #111);
+        }
+        .player-content .artwork .page-label {
+            position: absolute;
+            bottom: 30px;
+            right: 40px;
+            font-size: 28px;
+            color: rgba(255, 255, 255, 0.35);
+            font-weight: 300;
+            letter-spacing: 2px;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 4px 18px;
+            border-radius: 30px;
+            backdrop-filter: blur(4px);
+        }
+        .player-content .artwork .title-tag {
+            margin-right: 12px;
+            opacity: 0.6;
+        }
+        /* 音频封面 */
+        .player-content .audio-cover {
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2a3a4a, #1a2a3a);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 80px;
+            color: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 60px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .player-content .audio-cover .note {
+            font-size: 90px;
+            opacity: 0.15;
+        }
+        .player-content .audio-info {
+            position: absolute;
+            bottom: 140px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: #eee;
+            padding: 0 40px;
+        }
+        .player-content .audio-info .title {
+            font-size: 40px;
+            font-weight: 500;
+            letter-spacing: 1px;
+        }
+        .player-content .audio-info .meta {
+            font-size: 20px;
+            color: #888;
+            margin-top: 6px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            align-items: center;
+        }
+        .player-content .audio-info .meta .fav-icon {
+            color: #f0c040;
+            font-size: 24px;
+        }
+        .player-content .audio-info .meta .fav-icon.off {
+            color: #444;
+        }
+
+        /* 播放器控制栏 (默认隐藏) */
+        .player-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(12px);
+            display: none;
+            flex-direction: column;
+            padding: 16px 30px 20px 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .player-controls.visible {
+            display: flex;
+        }
+        .player-controls .progress-area {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding-bottom: 12px;
+        }
+        .player-controls .progress-area .track {
+            flex: 1;
+            height: 4px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+        .player-controls .progress-area .track .fill {
+            height: 100%;
+            width: 0%;
+            background: #f0c040;
+            border-radius: 4px;
+            transition: width 0.2s ease;
+        }
+        .player-controls .progress-area .time-label {
+            font-size: 18px;
+            color: #888;
+            min-width: 70px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+        .player-controls .button-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .player-controls .ctrl-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid transparent;
+            color: #ccc;
+            font-size: 22px;
+            padding: 10px 16px;
+            border-radius: 30px;
+            cursor: default;
+            transition: all 0.1s ease;
+            min-width: 60px;
+            text-align: center;
+            font-weight: 400;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .player-controls .ctrl-btn .label {
+            font-size: 14px;
+            font-weight: 300;
+            opacity: 0.6;
+        }
+        .player-controls .ctrl-btn.focused {
+            background: rgba(240, 192, 64, 0.2);
+            border-color: #f0c040;
+            color: #fff;
+            box-shadow: 0 0 30px rgba(240, 192, 64, 0.1);
+        }
+        .player-controls .ctrl-btn.active-state {
+            color: #f0c040;
+        }
+        .player-controls .ctrl-btn .icon-sm {
+            font-size: 20px;
+        }
+        .player-controls .ctrl-divider {
+            width: 1px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .player-controls .ctrl-btn.play-btn {
+            min-width: 80px;
+            font-size: 28px;
+            background: rgba(240, 192, 64, 0.15);
+            border-color: rgba(240, 192, 64, 0.3);
+        }
+        .player-controls .ctrl-btn.play-btn.focused {
+            background: rgba(240, 192, 64, 0.3);
+            border-color: #f0c040;
+        }
+
+        /* 绘本专用：状态文字（左上角） */
+        .player-status {
+            position: absolute;
+            top: 24px;
+            left: 30px;
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 300;
+            letter-spacing: 0.5px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 6px 20px;
+            border-radius: 30px;
+            backdrop-filter: blur(4px);
+            pointer-events: none;
+        }
+        .player-status .dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #5cb85c;
+            margin-right: 4px;
+        }
+        .player-status .dot.paused {
+            background: #f0ad4e;
+        }
+        .player-status .fav {
+            color: #f0c040;
+        }
+        .player-status .fav.off {
+            color: #555;
+        }
+
+        /* ========== 错误页 ========== */
+        #error-page {
+            background: #141414;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 40px;
+        }
+        .error-box {
+            max-width: 560px;
+        }
+        .error-box .err-icon {
+            font-size: 80px;
+            margin-bottom: 16px;
+            opacity: 0.6;
+        }
+        .error-box .err-title {
+            font-size: 36px;
+            font-weight: 500;
+            color: #eee;
+            margin-bottom: 10px;
+        }
+        .error-box .err-desc {
+            font-size: 22px;
+            color: #888;
+            line-height: 1.5;
+            margin-bottom: 32px;
+        }
+        .error-box .err-actions {
+            display: flex;
+            gap: 24px;
+            justify-content: center;
+        }
+        .error-box .err-actions .err-btn {
+            padding: 14px 40px;
+            font-size: 24px;
+            border-radius: 40px;
+            border: 2px solid transparent;
+            background: rgba(255, 255, 255, 0.06);
+            color: #ccc;
+            cursor: default;
+            transition: all 0.1s ease;
+            font-weight: 400;
+            min-width: 140px;
+        }
+        .error-box .err-actions .err-btn.primary {
+            background: #f0c040;
+            color: #111;
+        }
+        .error-box .err-actions .err-btn.focused {
+            border-color: #f0c040;
+            box-shadow: 0 0 40px rgba(240, 192, 64, 0.12);
+            background: rgba(240, 192, 64, 0.15);
+            color: #fff;
+        }
+        .error-box .err-actions .err-btn.primary.focused {
+            background: #f0c040;
+            color: #111;
+            border-color: #f0c040;
+            box-shadow: 0 0 40px rgba(240, 192, 64, 0.2);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* ========== 滚动条美化 ========== */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3a3a3a;
+            border-radius: 4px;
+        }
+
+        /* ========== 响应式 ========== */
+        @media (max-width: 1000px) {
+            .home-left {
+                width: 200px;
+                padding-right: 14px;
+            }
+            .home-left .app-title {
+                font-size: 24px;
+            }
+            .menu-item {
+                font-size: 20px;
+                padding: 10px 14px;
+            }
+            .menu-item.sub-item {
+                font-size: 17px;
+                padding-left: 34px;
+            }
+            .content-item {
+                font-size: 20px;
+                padding: 10px 14px;
+            }
+            .home-right {
+                width: 150px;
+                padding-left: 16px;
+                font-size: 15px;
+            }
+            .home-right .status-item .value {
+                font-size: 16px;
+            }
+            .player-status {
+                font-size: 16px;
+                padding: 4px 14px;
+                top: 16px;
+                left: 20px;
+            }
+            .player-content .artwork .page-label {
+                font-size: 20px;
+                bottom: 20px;
+                right: 24px;
+                padding: 2px 14px;
+            }
+            .player-controls .ctrl-btn {
+                font-size: 18px;
+                padding: 8px 12px;
+                min-width: 44px;
+            }
+            .player-controls .ctrl-btn.play-btn {
+                min-width: 60px;
+                font-size: 22px;
+            }
+            .player-content .audio-info .title {
+                font-size: 30px;
+            }
+            .player-content .audio-cover {
+                width: 160px;
+                height: 160px;
+            }
+        }
+        @media (max-width: 700px) {
+            .tv-screen {
+                border-radius: 12px;
+            }
+            .home-left {
+                width: 130px;
+                padding-right: 10px;
+            }
+            .home-left .app-title {
+                font-size: 18px;
+                padding-bottom: 10px;
+                margin-bottom: 10px;
+                flex-wrap: wrap;
+            }
+            .home-left .app-title small {
+                font-size: 12px;
+            }
+            .menu-item {
+                font-size: 15px;
+                padding: 6px 10px;
+            }
+            .menu-item.sub-item {
+                font-size: 13px;
+                padding-left: 28px;
+            }
+            .menu-item .badge {
+                font-size: 12px;
+                padding: 0 6px;
+                margin-left: 4px;
+            }
+            .home-center {
+                padding: 0 12px;
+            }
+            .home-center .section-title {
+                font-size: 16px;
+            }
+            .content-item {
+                font-size: 15px;
+                padding: 8px 10px;
+                gap: 8px;
+            }
+            .content-item .thumb {
+                width: 28px;
+                height: 28px;
+                font-size: 12px;
+            }
+            .content-item .info .sub {
+                font-size: 12px;
+            }
+            .content-item .tag {
+                font-size: 11px;
+                padding: 0 8px;
+            }
+            .home-right {
+                display: none;
+            }
+            .player-status {
+                font-size: 13px;
+                padding: 4px 12px;
+                top: 12px;
+                left: 14px;
+                gap: 10px;
+            }
+            .player-content .artwork .page-label {
+                font-size: 16px;
+                bottom: 14px;
+                right: 16px;
+                padding: 2px 10px;
+            }
+            .player-controls {
+                padding: 10px 12px 14px 12px;
+            }
+            .player-controls .ctrl-btn {
+                font-size: 14px;
+                padding: 6px 10px;
+                min-width: 36px;
+                border-radius: 20px;
+            }
+            .player-controls .ctrl-btn .label {
+                font-size: 10px;
+            }
+            .player-controls .ctrl-btn.play-btn {
+                min-width: 50px;
+                font-size: 18px;
+            }
+            .player-controls .progress-area .time-label {
+                font-size: 14px;
+                min-width: 50px;
+            }
+            .player-content .audio-info .title {
+                font-size: 22px;
+            }
+            .player-content .audio-cover {
+                width: 120px;
+                height: 120px;
+            }
+            .error-box .err-title {
+                font-size: 24px;
+            }
+            .error-box .err-desc {
+                font-size: 16px;
+            }
+            .error-box .err-actions .err-btn {
+                font-size: 18px;
+                padding: 10px 24px;
+                min-width: 100px;
+            }
+            .key-hint {
+                font-size: 10px;
+                padding: 4px 12px;
+                gap: 6px 12px;
+            }
+            .key-hint kbd {
+                font-size: 9px;
+                padding: 1px 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="tv-screen">
+        <div class="tv-screen-inner" id="app">
+
+            <!-- ==================== 主界面 ==================== -->
+            <div class="page active" id="home">
+                <div class="home-left">
+                    <div class="app-title">
+                        📚 TVBook
+                        <small>v1.0</small>
+                    </div>
+                    <div class="menu-list" id="menuList">
+                        <!-- 由 JS 动态生成 -->
+                    </div>
+                </div>
+                <div class="home-center">
+                    <div class="section-title" id="sectionTitle">
+                        <span id="sectionLabel">📖 内容</span>
+                        <span class="count" id="sectionCount">0 项</span>
+                    </div>
+                    <div class="content-grid" id="contentGrid">
+                        <!-- 由 JS 动态生成 -->
+                    </div>
+                </div>
+                <div class="home-right">
+                    <div class="status-item">
+                        <span class="label">📱 系统</span>
+                        <span class="value">Android 4.2</span>
+                    </div>
+                    <div class="status-divider"></div>
+                    <div class="status-item">
+                        <span class="label">💾 U盘</span>
+                        <span class="value ok">/mnt/usb</span>
+                    </div>
+                    <div class="status-divider"></div>
+                    <div class="status-item">
+                        <span class="label">📂 配置</span>
+                        <span class="value">/tvbooks/config/</span>
+                    </div>
+                    <div class="status-divider"></div>
+                    <div class="status-item">
+                        <span class="label">⏱️ 续播</span>
+                        <span class="value" id="resumeInfo">—</span>
+                    </div>
+                    <div class="status-divider"></div>
+                    <div class="status-item">
+                        <span class="label">📌 收藏 (当前分类)</span>
+                        <span class="value" id="favCount">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== 播放器页面 (通用) ==================== -->
+            <div class="page player-page" id="player">
+                <!-- 内容区域 -->
+                <div class="player-content" id="playerContent">
+                    <!-- 绘本模式 -->
+                    <div class="artwork" id="artworkBook" style="display:none;">
+                        <span id="artworkEmoji">🐻</span>
+                        <span class="page-label" id="pageLabel">
+                            <span class="title-tag" id="pageTitleTag">绘本</span>
+                            <span id="pageIndexDisplay">1 / 8</span>
+                        </span>
+                    </div>
+                    <!-- 音频模式 -->
+                    <div id="artworkAudio" style="display:none; flex-direction:column; align-items:center; gap:20px;">
+                        <div class="audio-cover"><span class="note">♪</span></div>
+                        <div class="audio-info">
+                            <div class="title" id="audioTitle">守株待兔</div>
+                            <div class="meta">
+                                <span id="audioFavIcon" class="fav-icon">★</span>
+                                <span id="audioDuration">3:20</span>
+                                <span id="audioStatusText">● 播放中</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 状态文字 (绘本专用) -->
+                <div class="player-status" id="playerStatus">
+                    <span id="statusBookTitle">📖 白雪公主</span>
+                    <span id="statusPageInfo">第 1 页</span>
+                    <span id="statusFav" class="fav">★ 已收藏</span>
+                    <span id="statusPlayMode">▶ 自动</span>
+                    <span class="dot" id="statusDot"></span>
+                </div>
+
+                <!-- 控制栏 -->
+                <div class="player-controls" id="playerControls">
+                    <div class="progress-area">
+                        <span class="time-label" id="progressCurrent">0:00</span>
+                        <div class="track"><div class="fill" id="progressFill"></div></div>
+                        <span class="time-label" id="progressTotal">0:00</span>
+                    </div>
+                    <div class="button-row" id="controlButtons">
+                        <!-- 动态生成按钮 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== 错误页 ==================== -->
+            <div class="page" id="error-page">
+                <div class="error-box">
+                    <div class="err-icon">⚠️</div>
+                    <div class="err-title">未找到 U 盘或配置文件</div>
+                    <div class="err-desc">
+                        请将包含 <strong>tvbooks</strong> 文件夹的 U 盘<br />
+                        插入设备，然后点击「重新检测」。
+                    </div>
+                    <div class="err-actions">
+                        <div class="err-btn primary" data-action="retry" id="errRetry">🔄 重新检测</div>
+                        <div class="err-btn" data-action="exit" id="errExit">✕ 退出</div>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /tv-screen-inner -->
+
+        <!-- 键盘提示 -->
+        <div class="key-hint">
+            <span><kbd>↑↓←→</kbd> 上一个/下一个</span>
+            <span><kbd>Enter</kbd> 确认 / 暂停</span>
+            <span><kbd>Esc</kbd> 返回 (连按两次退出)</span>
+            <span><kbd>M</kbd> 菜单 (显示/隐藏控制栏)</span>
+            <span><kbd>B</kbd> 收藏</span>
+        </div>
+    </div>
+
+    <script>
+        // ========================================================================
+        //  数据模拟
+        // ========================================================================
+        const DATA = {
+            // 分类菜单，支持 children (二级)
+            categories: [{
+                id: 'fairytale',
+                name: '🧚 童话故事',
+                type: 'picture',
+                children: [
+                    { id: 'fairytale_all', name: '📖 全部' },
+                    { id: 'fairytale_fav', name: '⭐ 我的收藏' }
+                ]
+            }, {
+                id: 'fable',
+                name: '🦊 寓言故事',
+                type: 'picture',
+                children: [
+                    { id: 'fable_all', name: '📖 全部' },
+                    { id: 'fable_fav', name: '⭐ 我的收藏' }
+                ]
+            }, {
+                id: 'idiom',
+                name: '📜 成语故事',
+                type: 'audio',
+                children: [
+                    { id: 'idiom_all', name: '🎵 全部' },
+                    { id: 'idiom_fav', name: '⭐ 我的收藏' }
+                ]
+            }, {
+                id: 'bedtime',
+                name: '🌙 睡前故事',
+                type: 'picture',
+                children: [
+                    { id: 'bedtime_all', name: '📖 全部' },
+                    { id: 'bedtime_fav', name: '⭐ 我的收藏' }
+                ]
+            }],
+            // 绘本数据按分类
+            books: {
+                fairytale: [
+                    { id: 'b1', title: '白雪公主', pages: 8, color: '#c0392b', emoji: '👸' },
+                    { id: 'b2', title: '小红帽', pages: 6, color: '#2980b9', emoji: '🧣' },
+                    { id: 'b3', title: '三只小猪', pages: 7, color: '#27ae60', emoji: '🐷' },
+                    { id: 'b4', title: '灰姑娘', pages: 9, color: '#8e44ad', emoji: '👠' },
+                ],
+                fable: [
+                    { id: 'b5', title: '龟兔赛跑', pages: 5, color: '#d35400', emoji: '🐢' },
+                    { id: 'b6', title: '狐狸和葡萄', pages: 4, color: '#e67e22', emoji: '🦊' },
+                    { id: 'b7', title: '狼来了', pages: 6, color: '#c0392b', emoji: '🐺' },
+                ],
+                bedtime: [
+                    { id: 'b8', title: '晚安月亮', pages: 6, color: '#2c3e50', emoji: '🌙' },
+                    { id: 'b9', title: '小星星', pages: 5, color: '#1a5276', emoji: '⭐' },
+                    { id: 'b10', title: '梦的摇篮', pages: 7, color: '#6c3483', emoji: '🛏️' },
+                ]
+            },
+            audios: {
+                idiom: [
+                    { id: 'a1', title: '守株待兔', duration: '3:20' },
+                    { id: 'a2', title: '掩耳盗铃', duration: '2:45' },
+                    { id: 'a3', title: '画蛇添足', duration: '3:05' },
+                    { id: 'a4', title: '亡羊补牢', duration: '2:50' },
+                ]
+            }
+        };
+
+        // 收藏数据按分类独立: favorites[categoryId] = Set(itemId)
+        const favorites = {};
+        // 初始化每个分类的收藏集合
+        DATA.categories.forEach(cat => {
+            favorites[cat.id] = new Set();
+        });
+        // 预设一些收藏
+        favorites.fairytale.add('b1');
+        favorites.idiom.add('a1');
+
+        // 历史记录
+        let history = {
+            categoryId: 'fairytale',
+            subId: 'fairytale_all', // 当前选中的子菜单id
+            bookId: 'b1',
+            page: 1,
+            audioId: 'a1',
+            progress: 0.37,
+        };
+
+        // 播放状态
+        let playerState = {
+            type: 'book', // 'book' | 'audio'
+            bookId: 'b1',
+            page: 1,
+            isPlaying: true,
+            isAuto: true, // 绘本自动翻页
+            audioId: 'a1',
+            audioPlaying: true,
+            audioProgress: 0.37,
+            isFav: false, // 当前播放项是否收藏
+        };
+
+        // ========================================================================
+        //  工具函数
+        // ========================================================================
+        function getBook(id) {
+            for (const cat of ['fairytale', 'fable', 'bedtime']) {
+                const found = DATA.books[cat].find(b => b.id === id);
+                if (found) return found;
+            }
+            return null;
+        }
+
+        function getAudio(id) {
+            return DATA.audios.idiom.find(a => a.id === id) || null;
+        }
+
+        function getCategoryBooks(catId) {
+            return DATA.books[catId] || [];
+        }
+
+        function getCategoryAudios(catId) {
+            return DATA.audios[catId] || [];
+        }
+
+        function getCategoryType(catId) {
+            const cat = DATA.categories.find(c => c.id === catId);
+            return cat ? cat.type : 'picture';
+        }
+
+        // 获取某个分类下的内容（全部或收藏）
+        function getCategoryItems(catId, subId) {
+            const isFav = subId.endsWith('_fav');
+            const type = getCategoryType(catId);
+            let items = [];
+            if (type === 'picture') {
+                items = getCategoryBooks(catId).map(b => ({ ...b, type: 'book' }));
+            } else if (type === 'audio') {
+                items = getCategoryAudios(catId).map(a => ({ ...a, type: 'audio' }));
+            }
+            if (isFav) {
+                const favSet = favorites[catId] || new Set();
+                items = items.filter(item => favSet.has(item.id));
+            }
+            return items;
+        }
+
+        function getCategoryName(catId) {
+            const cat = DATA.categories.find(c => c.id === catId);
+            return cat ? cat.name : '';
+        }
+
+        function getSubName(catId, subId) {
+            const cat = DATA.categories.find(c => c.id === catId);
+            if (!cat) return '';
+            const child = cat.children.find(ch => ch.id === subId);
+            return child ? child.name : '';
+        }
+
+        // 获取当前分类下的收藏数量
+        function getFavCount(catId) {
+            const set = favorites[catId] || new Set();
+            return set.size;
+        }
+
+        // ========================================================================
+        //  状态管理
+        // ========================================================================
+        let currentCategoryId = 'fairytale';
+        let currentSubId = 'fairytale_all'; // 当前选中的子菜单id
+        let menuFocusIndex = 0; // 可见菜单项中的索引
+        let contentFocusIndex = 0;
+        let focusZone = 'menu'; // 'menu' | 'content' | 'playerControls' | 'error'
+
+        // 菜单展开状态: 存储每个分类父项是否展开
+        let expanded = {};
+        DATA.categories.forEach(cat => { expanded[cat.id] = false; });
+        // 默认展开第一个
+        expanded['fairytale'] = true;
+
+        // 获取当前可见的菜单项列表（扁平化）
+        function getVisibleMenuItems() {
+            const items = [];
+            DATA.categories.forEach((cat, idx) => {
+                // 父项
+                items.push({
+                    id: cat.id,
+                    name: cat.name,
+                    icon: cat.icon || '📂',
+                    isParent: true,
+                    level: 0,
+                    categoryId: cat.id,
+                    isExpanded: expanded[cat.id] || false,
+                });
+                // 如果展开，添加子项
+                if (expanded[cat.id]) {
+                    cat.children.forEach(child => {
+                        items.push({
+                            id: child.id,
+                            name: child.name,
+                            isParent: false,
+                            level: 1,
+                            categoryId: cat.id,
+                            subId: child.id,
+                        });
+                    });
+                }
+            });
+            return items;
+        }
+
+        // 获取当前选中的分类和子项
+        function getCurrentSelection() {
+            const visible = getVisibleMenuItems();
+            if (menuFocusIndex >= visible.length) menuFocusIndex = 0;
+            const item = visible[menuFocusIndex];
+            if (!item) return { categoryId: currentCategoryId, subId: currentSubId };
+            if (item.isParent) {
+                // 父项，则使用该分类的默认子项（第一个子项）
+                const cat = DATA.categories.find(c => c.id === item.id);
+                if (cat && cat.children.length > 0) {
+                    return { categoryId: item.id, subId: cat.children[0].id };
+                }
+                return { categoryId: item.id, subId: null };
+            } else {
+                return { categoryId: item.categoryId, subId: item.subId };
+            }
+        }
+
+        // ========================================================================
+        //  渲染主界面
+        // ========================================================================
+        function renderMenu() {
+            const menuList = document.getElementById('menuList');
+            const visible = getVisibleMenuItems();
+            menuList.innerHTML = '';
+            visible.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = 'menu-item' + (idx === menuFocusIndex ? ' focused' : '');
+                if (item.isParent) {
+                    div.classList.add('parent-item');
+                    const arrow = item.isExpanded ? '▼' : '▶';
+                    div.innerHTML = `
+                        <span class="icon">${item.icon}</span>
+                        ${item.name}
+                        <span class="arrow">${arrow}</span>
+                    `;
+                } else {
+                    div.classList.add('sub-item');
+                    // 显示收藏数量
+                    let badge = '';
+                    if (item.id.endsWith('_fav')) {
+                        const count = getFavCount(item.categoryId);
+                        if (count > 0) badge = `<span class="badge">${count}</span>`;
+                    }
+                    div.innerHTML = `
+                        <span class="indent"></span>
+                        ${item.name}
+                        ${badge}
+                    `;
+                }
+                div.dataset.index = idx;
+                div.dataset.id = item.id;
+                div.dataset.isParent = item.isParent ? 'true' : 'false';
+                div.dataset.categoryId = item.categoryId || '';
+                div.dataset.subId = item.subId || '';
+                menuList.appendChild(div);
+            });
+        }
+
+        function renderContent() {
+            // 根据当前选中的分类和子项获取内容
+            const sel = getCurrentSelection();
+            const catId = sel.categoryId;
+            const subId = sel.subId;
+            if (!catId || !subId) {
+                // 如果选中父项但没有子项，则不显示内容
+                document.getElementById('sectionLabel').textContent = '📖 请选择';
+                document.getElementById('sectionCount').textContent = '0 项';
+                document.getElementById('contentGrid').innerHTML = '<div class="content-item" style="color:#555;justify-content:center;padding:30px;">请选择一个分类</div>';
+                return;
+            }
+            currentCategoryId = catId;
+            currentSubId = subId;
+            const items = getCategoryItems(catId, subId);
+            const catName = getCategoryName(catId);
+            const subName = getSubName(catId, subId);
+            document.getElementById('sectionLabel').textContent = `📖 ${catName} · ${subName}`;
+            document.getElementById('sectionCount').textContent = `${items.length} 项`;
+
+            const grid = document.getElementById('contentGrid');
+            grid.innerHTML = '';
+            if (items.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'content-item';
+                empty.style.color = '#555';
+                empty.style.fontSize = '22px';
+                empty.style.padding = '30px 20px';
+                empty.style.justifyContent = 'center';
+                empty.textContent = '📭 暂无内容';
+                grid.appendChild(empty);
+                return;
+            }
+            items.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = 'content-item' + (idx === contentFocusIndex ? ' focused' : '');
+                div.dataset.index = idx;
+                div.dataset.itemId = item.id;
+                div.dataset.type = item.type;
+                const isBook = item.type === 'book';
+                const thumbColor = isBook ? (item.color || '#444') : '#2a3a4a';
+                const thumbEmoji = isBook ? (item.emoji || '📖') : '🎵';
+                const tagText = isBook ? `📖 ${item.pages}页` : `🎵 ${item.duration || '--'}`;
+                const tagClass = isBook ? 'book-tag' : 'audio-tag';
+                const subText = isBook ? `共 ${item.pages} 页` : (item.duration || '');
+                div.innerHTML = `
+                    <div class="thumb" style="background:${thumbColor};">${thumbEmoji}</div>
+                    <div class="info">
+                        <span>${item.title}</span>
+                        <span class="sub">${subText}</span>
+                    </div>
+                    <span class="tag ${tagClass}">${tagText}</span>
+                `;
+                grid.appendChild(div);
+            });
+            // 更新收藏计数
+            updateStatusInfo();
+        }
+
+        function updateStatusInfo() {
+            const catId = currentCategoryId;
+            const count = getFavCount(catId);
+            document.getElementById('favCount').textContent = count;
+
+            // 续播信息
+            let info = '—';
+            if (history.bookId) {
+                const book = getBook(history.bookId);
+                if (book) info = `📖 ${book.title} · 第${history.page}页`;
+            } else if (history.audioId) {
+                const audio = getAudio(history.audioId);
+                if (audio) info = `🎵 ${audio.title}`;
+            }
+            document.getElementById('resumeInfo').textContent = info;
+        }
+
+        function refreshHome() {
+            renderMenu();
+            renderContent();
+            // 高亮菜单
+            document.querySelectorAll('.menu-item').forEach((el, i) => {
+                el.classList.toggle('focused', i === menuFocusIndex);
+            });
+            // 高亮内容
+            document.querySelectorAll('.content-item').forEach((el, i) => {
+                el.classList.toggle('focused', i === contentFocusIndex);
+            });
+            updateStatusInfo();
+        }
+
+        // ========================================================================
+        //  播放器渲染
+        // ========================================================================
+        function renderPlayer() {
+            const type = playerState.type;
+            const isBook = type === 'book';
+            const content = document.getElementById('playerContent');
+            const bookArt = document.getElementById('artworkBook');
+            const audioArt = document.getElementById('artworkAudio');
+            const statusDiv = document.getElementById('playerStatus');
+            const controls = document.getElementById('playerControls');
+
+            if (isBook) {
+                bookArt.style.display = 'flex';
+                audioArt.style.display = 'none';
+                statusDiv.style.display = 'flex';
+                // 更新绘本内容
+                const book = getBook(playerState.bookId);
+                if (book) {
+                    const page = Math.min(Math.max(playerState.page, 1), book.pages);
+                    const colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#2c3e50'];
+                    const colorIdx = (page - 1) % colors.length;
+                    const bgColor = book.color || colors[colorIdx];
+                    document.getElementById('artworkEmoji').textContent = book.emoji || '📖';
+                    document.getElementById('artworkEmoji').style.fontSize = Math.min(180, 80 + (book.pages - page) * 6) + 'px';
+                    document.getElementById('pageTitleTag').textContent = `📖 ${book.title}`;
+                    document.getElementById('pageIndexDisplay').textContent = `${page} / ${book.pages}`;
+                    // 背景
+                    const art = document.querySelector('.artwork');
+                    art.style.background = `radial-gradient(circle at 30% 40%, ${bgColor}dd, ${bgColor}88)`;
+
+                    // 状态栏
+                    document.getElementById('statusBookTitle').textContent = `📖 ${book.title}`;
+                    document.getElementById('statusPageInfo').textContent = `第 ${page} 页`;
+                    const isFav = favorites[currentCategoryId].has(book.id);
+                    document.getElementById('statusFav').textContent = isFav ? '★ 已收藏' : '☆ 未收藏';
+                    document.getElementById('statusFav').className = 'fav' + (isFav ? '' : ' off');
+                    document.getElementById('statusPlayMode').textContent = playerState.isAuto ? '▶ 自动' : '⏸ 手动';
+                    const dot = document.getElementById('statusDot');
+                    dot.className = 'dot' + (playerState.isPlaying ? '' : ' paused');
+
+                    // 更新进度条 (页码)
+                    const total = book.pages;
+                    const progress = (page - 1) / (total - 1 || 1);
+                    document.getElementById('progressFill').style.width = (progress * 100) + '%';
+                    document.getElementById('progressCurrent').textContent = `${page} / ${total}`;
+                    document.getElementById('progressTotal').textContent = `${total} 页`;
+                    // 控制按钮
+                    buildControlButtons('book', book.id, isFav);
+                }
+            } else {
+                // 音频
+                bookArt.style.display = 'none';
+                audioArt.style.display = 'flex';
+                statusDiv.style.display = 'none';
+                const audio = getAudio(playerState.audioId);
+                if (audio) {
+                    document.getElementById('audioTitle').textContent = audio.title;
+                    document.getElementById('audioDuration').textContent = audio.duration;
+                    const isFav = favorites[currentCategoryId].has(audio.id);
+                    document.getElementById('audioFavIcon').textContent = isFav ? '★' : '☆';
+                    document.getElementById('audioFavIcon').className = 'fav-icon' + (isFav ? '' : ' off');
+                    document.getElementById('audioStatusText').textContent = playerState.audioPlaying ? '● 播放中' : '○ 已暂停';
+                    document.getElementById('audioStatusText').style.color = playerState.audioPlaying ? '#5cb85c' : '#888';
+                    // 进度
+                    const totalSec = parseDuration(audio.duration);
+                    const curSec = Math.floor(playerState.audioProgress * totalSec);
+                    document.getElementById('progressFill').style.width = (playerState.audioProgress * 100) + '%';
+                    document.getElementById('progressCurrent').textContent = formatTime(curSec);
+                    document.getElementById('progressTotal').textContent = audio.duration;
+                    // 控制按钮
+                    buildControlButtons('audio', audio.id, isFav);
+                }
+            }
+        }
+
+        function buildControlButtons(type, itemId, isFav) {
+            const row = document.getElementById('controlButtons');
+            row.innerHTML = '';
+            const isBook = type === 'book';
+            const actions = isBook ? [
+                { id: 'prevPage', label: '◀◀', text: '上一页' },
+                { id: 'prevBook', label: '◀', text: '上一本' },
+                { id: 'playToggle', label: playerState.isPlaying ? '⏸' : '▶', text: playerState.isPlaying ? '暂停' : '播放',
+                    cls: 'play-btn' },
+                { id: 'nextBook', label: '▶', text: '下一本' },
+                { id: 'nextPage', label: '▶▶', text: '下一页' },
+                { id: 'favToggle', label: isFav ? '★' : '☆', text: isFav ? '已收藏' : '收藏' },
+            ] : [
+                { id: 'prevTrack', label: '◀◀', text: '上一首' },
+                { id: 'playToggle', label: playerState.audioPlaying ? '⏸' : '▶', text: playerState.audioPlaying ? '暂停' :
+                        '播放', cls: 'play-btn' },
+                { id: 'nextTrack', label: '▶▶', text: '下一首' },
+                { id: 'favToggle', label: isFav ? '★' : '☆', text: isFav ? '已收藏' : '收藏' },
+            ];
+            actions.forEach((act, idx) => {
+                const btn = document.createElement('div');
+                btn.className = 'ctrl-btn' + (act.cls ? ' ' + act.cls : '');
+                btn.dataset.action = act.id;
+                btn.innerHTML = `${act.label} <span class="label">${act.text}</span>`;
+                if (act.id === 'playToggle') btn.classList.add('play-btn');
+                if (act.id === 'favToggle' && isFav) btn.classList.add('active-state');
+                row.appendChild(btn);
+            });
+            // 焦点默认在播放按钮上
+            const playIdx = actions.findIndex(a => a.id === 'playToggle');
+            playerControlsFocus = playIdx >= 0 ? playIdx : 0;
+            updatePlayerControlsFocus();
+        }
+
+        let playerControlsFocus = 0;
+
+        function updatePlayerControlsFocus() {
+            const btns = document.querySelectorAll('#controlButtons .ctrl-btn');
+            btns.forEach((el, i) => {
+                el.classList.toggle('focused', i === playerControlsFocus);
+            });
+        }
+
+        function parseDuration(str) {
+            const parts = str.split(':').map(Number);
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            return parseInt(str) || 60;
+        }
+
+        function formatTime(sec) {
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        // ========================================================================
+        //  页面切换
+        // ========================================================================
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            const target = document.getElementById(pageId);
+            if (target) target.classList.add('active');
+
+            if (pageId === 'home') {
+                focusZone = 'menu';
+                refreshHome();
+            } else if (pageId === 'player') {
+                focusZone = 'playerControls';
+                renderPlayer();
+                document.getElementById('playerControls').classList.remove('visible');
+            } else if (pageId === 'error-page') {
+                focusZone = 'error';
+                errorFocus = 0;
+                updateErrorFocus();
+            }
+            updateAllFocus();
+        }
+
+        // ========================================================================
+        //  焦点管理
+        // ========================================================================
+        function updateAllFocus() {
+            document.querySelectorAll('.focused').forEach(el => el.classList.remove('focused'));
+
+            if (focusZone === 'menu') {
+                const items = document.querySelectorAll('.menu-item');
+                items.forEach((el, i) => el.classList.toggle('focused', i === menuFocusIndex));
+                // 内容保持高亮
+                const contents = document.querySelectorAll('.content-item');
+                contents.forEach((el, i) => el.classList.toggle('focused', i === contentFocusIndex));
+            } else if (focusZone === 'content') {
+                const contents = document.querySelectorAll('.content-item');
+                contents.forEach((el, i) => el.classList.toggle('focused', i === contentFocusIndex));
+                const items = document.querySelectorAll('.menu-item');
+                items.forEach((el, i) => el.classList.toggle('focused', i === menuFocusIndex));
+            } else if (focusZone === 'playerControls') {
+                updatePlayerControlsFocus();
+            } else if (focusZone === 'error') {
+                updateErrorFocus();
+            }
+        }
+
+        let errorFocus = 0;
+
+        function updateErrorFocus() {
+            const btns = [document.getElementById('errRetry'), document.getElementById('errExit')];
+            btns.forEach((el, i) => {
+                el.classList.toggle('focused', i === errorFocus);
+            });
+        }
+
+        // ========================================================================
+        //  遥控器事件处理
+        // ========================================================================
+        let lastBackTime = 0;
+
+        document.addEventListener('keydown', (e) => {
+            const key = e.key;
+            const activePage = document.querySelector('.page.active');
+            if (!activePage) return;
+            const pageId = activePage.id;
+
+            // 全局返回键
+            if (key === 'Escape') {
+                e.preventDefault();
+                if (pageId === 'home') {
+                    const now = Date.now();
+                    if (now - lastBackTime < 2000) {
+                        // 退出
+                        document.body.innerHTML =
+                            '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b0b0b;color:#555;font-size:28px;font-family:sans-serif;">已退出 TVBook</div>';
+                    } else {
+                        lastBackTime = now;
+                        // 可以显示提示，但不影响
+                    }
+                } else if (pageId === 'player') {
+                    const controls = document.getElementById('playerControls');
+                    if (controls.classList.contains('visible')) {
+                        controls.classList.remove('visible');
+                        focusZone = 'playerControls';
+                        updateAllFocus();
+                    } else {
+                        // 返回主页
+                        showPage('home');
+                    }
+                } else if (pageId === 'error-page') {
+                    // 退出
+                    document.body.innerHTML =
+                        '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b0b0b;color:#555;font-size:28px;font-family:sans-serif;">已退出 TVBook</div>';
+                }
+                return;
+            }
+
+            // 菜单键
+            if (key === 'm' || key === 'M') {
+                e.preventDefault();
+                if (pageId === 'player') {
+                    const controls = document.getElementById('playerControls');
+                    const visible = controls.classList.contains('visible');
+                    controls.classList.toggle('visible', !visible);
+                    if (!visible) {
+                        focusZone = 'playerControls';
+                        // 焦点放在播放按钮
+                        const btns = document.querySelectorAll('#controlButtons .ctrl-btn');
+                        const playIdx = Array.from(btns).findIndex(b => b.dataset.action === 'playToggle');
+                        playerControlsFocus = playIdx >= 0 ? playIdx : 0;
+                        updatePlayerControlsFocus();
+                    } else {
+                        focusZone = 'playerControls';
+                    }
+                    updateAllFocus();
+                }
+                return;
+            }
+
+            // 收藏快捷键
+            if (key === 'b' || key === 'B') {
+                e.preventDefault();
+                if (pageId === 'player') {
+                    handlePlayerAction('favToggle');
+                }
+                return;
+            }
+
+            // 方向键和 Enter
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+                e.preventDefault();
+                if (pageId === 'home') {
+                    handleHomeNavigation(key);
+                } else if (pageId === 'player') {
+                    const controls = document.getElementById('playerControls');
+                    if (controls.classList.contains('visible')) {
+                        handlePlayerControlNav(key);
+                    } else {
+                        handlePlayerImmersive(key);
+                    }
+                } else if (pageId === 'error-page') {
+                    handleErrorNav(key);
+                }
+                updateAllFocus();
+                return;
+            }
+
+            if (key === 'Enter') {
+                e.preventDefault();
+                if (pageId === 'home') {
+                    handleHomeEnter();
+                } else if (pageId === 'player') {
+                    const controls = document.getElementById('playerControls');
+                    if (controls.classList.contains('visible')) {
+                        handlePlayerControlEnter();
+                    } else {
+                        // 沉浸：暂停/继续
+                        if (playerState.type === 'book') {
+                            playerState.isPlaying = !playerState.isPlaying;
+                            renderPlayer();
+                        } else {
+                            playerState.audioPlaying = !playerState.audioPlaying;
+                            renderPlayer();
+                        }
+                    }
+                } else if (pageId === 'error-page') {
+                    handleErrorEnter();
+                }
+                return;
+            }
+        });
+
+        // ---- Home 导航 ----
+        function handleHomeNavigation(key) {
+            const visibleItems = getVisibleMenuItems();
+            const totalMenu = visibleItems.length;
+            if (key === 'ArrowUp') {
+                menuFocusIndex = (menuFocusIndex - 1 + totalMenu) % totalMenu;
+                // 如果当前焦点在子项，并且父项折叠，则跳过？但我们已经更新visible，所以安全
+                const item = visibleItems[menuFocusIndex];
+                if (item && item.isParent) {
+                    // 如果父项未展开，自动展开？或者不处理，让用户按Enter展开
+                }
+                refreshHome();
+            } else if (key === 'ArrowDown') {
+                menuFocusIndex = (menuFocusIndex + 1) % totalMenu;
+                refreshHome();
+            } else if (key === 'ArrowLeft') {
+                // 如果焦点在子项，尝试折叠父项
+                const item = visibleItems[menuFocusIndex];
+                if (item && !item.isParent) {
+                    const parentId = item.categoryId;
+                    if (expanded[parentId]) {
+                        expanded[parentId] = false;
+                        // 焦点移到父项
+                        const parentIndex = visibleItems.findIndex(v => v.id === parentId && v.isParent);
+                        if (parentIndex >= 0) menuFocusIndex = parentIndex;
+                        refreshHome();
+                    }
+                } else if (item && item.isParent) {
+                    // 父项，折叠自己
+                    if (expanded[item.id]) {
+                        expanded[item.id] = false;
+                        refreshHome();
+                    }
+                }
+            } else if (key === 'ArrowRight') {
+                const item = visibleItems[menuFocusIndex];
+                if (item && item.isParent) {
+                    if (!expanded[item.id]) {
+                        expanded[item.id] = true;
+                        refreshHome();
+                        // 焦点移到第一个子项
+                        const newVisible = getVisibleMenuItems();
+                        const childIndex = newVisible.findIndex(v => v.categoryId === item.id && !v.isParent);
+                        if (childIndex >= 0) menuFocusIndex = childIndex;
+                        refreshHome();
+                    }
+                }
+            }
+        }
+
+        function handleHomeEnter() {
+            const visibleItems = getVisibleMenuItems();
+            if (menuFocusIndex >= visibleItems.length) return;
+            const item = visibleItems[menuFocusIndex];
+            if (item.isParent) {
+                // 切换展开/折叠
+                expanded[item.id] = !expanded[item.id];
+                refreshHome();
+                // 如果展开，焦点移到第一个子项
+                if (expanded[item.id]) {
+                    const newVisible = getVisibleMenuItems();
+                    const childIndex = newVisible.findIndex(v => v.categoryId === item.id && !v.isParent);
+                    if (childIndex >= 0) menuFocusIndex = childIndex;
+                    refreshHome();
+                }
+            } else {
+                // 子项：更新内容
+                const catId = item.categoryId;
+                const subId = item.subId;
+                if (catId && subId) {
+                    currentCategoryId = catId;
+                    currentSubId = subId;
+                    renderContent();
+                    updateStatusInfo();
+                    focusZone = 'content';
+                    contentFocusIndex = 0;
+                    updateAllFocus();
+                }
+            }
+        }
+
+        // ---- 内容列表 Enter ----
+        function handleHomeEnterOnContent() {
+            const items = getCategoryItems(currentCategoryId, currentSubId);
+            if (items.length === 0 || contentFocusIndex >= items.length) return;
+            const item = items[contentFocusIndex];
+            if (item.type === 'book') {
+                playerState.type = 'book';
+                playerState.bookId = item.id;
+                playerState.page = 1;
+                playerState.isPlaying = true;
+                playerState.isAuto = true;
+                // 检查收藏
+                const isFav = favorites[currentCategoryId].has(item.id);
+                playerState.isFav = isFav;
+                showPage('player');
+                renderPlayer();
+                document.getElementById('playerControls').classList.remove('visible');
+                focusZone = 'playerControls';
+                updateAllFocus();
+            } else if (item.type === 'audio') {
+                playerState.type = 'audio';
+                playerState.audioId = item.id;
+                playerState.audioPlaying = true;
+                playerState.audioProgress = 0;
+                const isFav = favorites[currentCategoryId].has(item.id);
+                playerState.isFav = isFav;
+                showPage('player');
+                renderPlayer();
+                document.getElementById('playerControls').classList.remove('visible');
+                focusZone = 'playerControls';
+                updateAllFocus();
+            }
+        }
+
+        // 重写home Enter处理，区分焦点区域
+        // 在原handleHomeEnter中判断焦点区域
+        // 我们修改handleHomeEnter调用：
+        // 但上面已经定义了handleHomeEnter，我们另外处理content Enter
+        // 修改：在home页面按Enter时，判断focusZone
+        // 但我们的handleHomeEnter只处理菜单，现在需要修改。
+        // 我们重新定义home Enter逻辑：
+        // 在keydown事件中，当pageId===home且key===Enter时，调用一个新的函数。
+        // 我们将原handleHomeEnter改名为handleMenuEnter，并新加handleHomeEnterContent。
+        // 但为了简化，直接在事件中判断：
+
+        // 我们重写handleHomeEnter函数：
+        function handleHomeEnter() {
+            if (focusZone === 'menu') {
+                const visibleItems = getVisibleMenuItems();
+                if (menuFocusIndex >= visibleItems.length) return;
+                const item = visibleItems[menuFocusIndex];
+                if (item.isParent) {
+                    expanded[item.id] = !expanded[item.id];
+                    refreshHome();
+                    if (expanded[item.id]) {
+                        const newVisible = getVisibleMenuItems();
+                        const childIndex = newVisible.findIndex(v => v.categoryId === item.id && !v.isParent);
+                        if (childIndex >= 0) menuFocusIndex = childIndex;
+                        refreshHome();
+                    }
+                } else {
+                    const catId = item.categoryId;
+                    const subId = item.subId;
+                    if (catId && subId) {
+                        currentCategoryId = catId;
+                        currentSubId = subId;
+                        renderContent();
+                        updateStatusInfo();
+                        focusZone = 'content';
+                        contentFocusIndex = 0;
+                        updateAllFocus();
+                    }
+                }
+            } else if (focusZone === 'content') {
+                handleHomeEnterOnContent();
+            }
+        }
+
+        // ---- 播放器沉浸导航 ----
+        function handlePlayerImmersive(key) {
+            if (playerState.type === 'book') {
+                const book = getBook(playerState.bookId);
+                if (!book) return;
+                if (key === 'ArrowLeft') {
+                    playerState.page = Math.max(1, playerState.page - 1);
+                    renderPlayer();
+                } else if (key === 'ArrowRight') {
+                    playerState.page = Math.min(book.pages, playerState.page + 1);
+                    renderPlayer();
+                } else if (key === 'ArrowUp') {
+                    // 上一本
+                    navigateBook(-1);
+                } else if (key === 'ArrowDown') {
+                    navigateBook(1);
+                }
+            } else {
+                // 音频
+                if (key === 'ArrowUp' || key === 'ArrowLeft') {
+                    navigateAudio(-1);
+                } else if (key === 'ArrowDown' || key === 'ArrowRight') {
+                    navigateAudio(1);
+                }
+            }
+        }
+
+        function navigateBook(delta) {
+            const allBooks = getCategoryBooks(currentCategoryId) || [];
+            if (allBooks.length === 0) return;
+            const idx = allBooks.findIndex(b => b.id === playerState.bookId);
+            if (idx === -1) return;
+            const newIdx = (idx + delta + allBooks.length) % allBooks.length;
+            const newBook = allBooks[newIdx];
+            playerState.bookId = newBook.id;
+            playerState.page = 1;
+            playerState.isPlaying = true;
+            renderPlayer();
+        }
+
+        function navigateAudio(delta) {
+            const allAudios = getCategoryAudios(currentCategoryId) || [];
+            if (allAudios.length === 0) return;
+            const idx = allAudios.findIndex(a => a.id === playerState.audioId);
+            if (idx === -1) return;
+            const newIdx = (idx + delta + allAudios.length) % allAudios.length;
+            const newAudio = allAudios[newIdx];
+            playerState.audioId = newAudio.id;
+            playerState.audioProgress = 0;
+            playerState.audioPlaying = true;
+            renderPlayer();
+        }
+
+        // ---- 播放器控制栏导航 ----
+        function handlePlayerControlNav(key) {
+            const btns = document.querySelectorAll('#controlButtons .ctrl-btn');
+            const total = btns.length;
+            if (total === 0) return;
+            if (key === 'ArrowLeft' || key === 'ArrowRight') {
+                const dir = key === 'ArrowLeft' ? -1 : 1;
+                playerControlsFocus = (playerControlsFocus + dir + total) % total;
+                updatePlayerControlsFocus();
+            }
+        }
+
+        function handlePlayerControlEnter() {
+            const btns = document.querySelectorAll('#controlButtons .ctrl-btn');
+            if (playerControlsFocus >= btns.length) return;
+            const btn = btns[playerControlsFocus];
+            const action = btn.dataset.action;
+            if (action) handlePlayerAction(action);
+        }
+
+        function handlePlayerAction(action) {
+            if (playerState.type === 'book') {
+                const book = getBook(playerState.bookId);
+                if (!book) return;
+                switch (action) {
+                    case 'prevPage':
+                        playerState.page = Math.max(1, playerState.page - 1);
+                        renderPlayer();
+                        break;
+                    case 'nextPage':
+                        playerState.page = Math.min(book.pages, playerState.page + 1);
+                        renderPlayer();
+                        break;
+                    case 'prevBook':
+                        navigateBook(-1);
+                        break;
+                    case 'nextBook':
+                        navigateBook(1);
+                        break;
+                    case 'playToggle':
+                        playerState.isPlaying = !playerState.isPlaying;
+                        renderPlayer();
+                        break;
+                    case 'favToggle':
+                        toggleFav(book.id);
+                        renderPlayer();
+                        updateStatusInfo();
+                        break;
+                }
+            } else {
+                const audio = getAudio(playerState.audioId);
+                if (!audio) return;
+                switch (action) {
+                    case 'prevTrack':
+                        navigateAudio(-1);
+                        break;
+                    case 'nextTrack':
+                        navigateAudio(1);
+                        break;
+                    case 'playToggle':
+                        playerState.audioPlaying = !playerState.audioPlaying;
+                        renderPlayer();
+                        break;
+                    case 'favToggle':
+                        toggleFav(audio.id);
+                        renderPlayer();
+                        updateStatusInfo();
+                        break;
+                }
+            }
+        }
+
+        function toggleFav(itemId) {
+            const set = favorites[currentCategoryId] || new Set();
+            if (set.has(itemId)) {
+                set.delete(itemId);
+            } else {
+                set.add(itemId);
+            }
+            favorites[currentCategoryId] = set;
+            // 更新当前播放状态中的收藏标志
+            if (playerState.type === 'book' && playerState.bookId === itemId) {
+                playerState.isFav = set.has(itemId);
+            } else if (playerState.type === 'audio' && playerState.audioId === itemId) {
+                playerState.isFav = set.has(itemId);
+            }
+        }
+
+        // ---- 错误页 ----
+        function handleErrorNav(key) {
+            if (key === 'ArrowLeft' || key === 'ArrowRight') {
+                errorFocus = 1 - errorFocus;
+                updateErrorFocus();
+            }
+        }
+
+        function handleErrorEnter() {
+            if (errorFocus === 0) {
+                showPage('home');
+            } else {
+                document.body.innerHTML =
+                    '<div style="display:flex;justify-content:center;align-items:center;height:100vh;background:#0b0b0b;color:#555;font-size:28px;font-family:sans-serif;">已退出 TVBook</div>';
+            }
+        }
+
+        // ========================================================================
+        //  自动播放（绘本自动翻页 + 音频进度模拟）
+        // ========================================================================
+        let autoPlayTimer = null;
+
+        function startAutoPlay() {
+            if (autoPlayTimer) clearInterval(autoPlayTimer);
+            autoPlayTimer = setInterval(() => {
+                const activePage = document.querySelector('.page.active');
+                if (!activePage || activePage.id !== 'player') return;
+                const controls = document.getElementById('playerControls');
+                if (controls.classList.contains('visible')) return; // 控制栏显示时不自动操作
+
+                if (playerState.type === 'book') {
+                    if (playerState.isAuto && playerState.isPlaying) {
+                        const book = getBook(playerState.bookId);
+                        if (book) {
+                            if (playerState.page < book.pages) {
+                                playerState.page += 1;
+                                renderPlayer();
+                            } else {
+                                playerState.page = 1;
+                                renderPlayer();
+                            }
+                        }
+                    }
+                } else {
+                    // 音频进度
+                    if (playerState.audioPlaying) {
+                        const audio = getAudio(playerState.audioId);
+                        if (audio) {
+                            const totalSec = parseDuration(audio.duration);
+                            const step = 1 / totalSec;
+                            playerState.audioProgress = Math.min(1, playerState.audioProgress + step * 0.5);
+                            if (playerState.audioProgress >= 1) {
+                                playerState.audioProgress = 0;
+                                navigateAudio(1);
+                            }
+                            renderPlayer();
+                        }
+                    }
+                }
+            }, 800);
+        }
+
+        // ========================================================================
+        //  初始化
+        // ========================================================================
+        function init() {
+            // 默认展开第一个分类
+            expanded['fairytale'] = true;
+            currentCategoryId = 'fairytale';
+            currentSubId = 'fairytale_all';
+            menuFocusIndex = 0;
+            contentFocusIndex = 0;
+            focusZone = 'menu';
+
+            // 预置收藏
+            favorites.fairytale.add('b1');
+            favorites.idiom.add('a1');
+
+            // 历史
+            history.bookId = 'b1';
+            history.page = 1;
+            history.audioId = 'a1';
+            history.progress = 0.37;
+
+            playerState.type = 'book';
+            playerState.bookId = 'b1';
+            playerState.page = 1;
+            playerState.isPlaying = true;
+            playerState.isAuto = true;
+            playerState.audioId = 'a1';
+            playerState.audioPlaying = true;
+            playerState.audioProgress = 0.37;
+
+            refreshHome();
+            showPage('home');
+            startAutoPlay();
+
+            // 监听内容项点击（模拟遥控器Enter在content焦点时）
+            // 在handleHomeEnter中已处理
+        }
+
+        // 暴露调试
+        window.__debug = {
+            DATA,
+            favorites,
+            expanded,
+            playerState,
+            refreshHome,
+            renderPlayer,
+            showPage,
+            getVisibleMenuItems,
+        };
+
+        init();
+    </script>
+</body>
+</html>

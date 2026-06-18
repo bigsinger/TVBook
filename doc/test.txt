@@ -1,0 +1,24 @@
+adb push  .\menu.txt /data/local/tmp/tvbooks/menu.txt
+
+adb push  .\test\huiben\池塘\1.jpg /data/local/tmp/tvbooks/huiben/chitang/1.jpg
+adb push  .\test\huiben\池塘\2.jpg /data/local/tmp/tvbooks/huiben/chitang/2.jpg
+adb push  .\test\huiben\池塘\3.jpg /data/local/tmp/tvbooks/huiben/chitang/3.jpg
+adb push  .\test\huiben\池塘\4.jpg /data/local/tmp/tvbooks/huiben/chitang/4.jpg
+
+adb push  .\test\huiben\池塘\1.mp3 /data/local/tmp/tvbooks/huiben/chitang/1.mp3
+adb push  .\test\huiben\池塘\2.mp3 /data/local/tmp/tvbooks/huiben/chitang/2.mp3
+adb push  .\test\huiben\池塘\3.mp3 /data/local/tmp/tvbooks/huiben/chitang/3.mp3
+adb push  .\test\huiben\池塘\4.mp3 /data/local/tmp/tvbooks/huiben/chitang/4.mp3
+
+
+adb push  .\test\huiben\二桃杀三士\1.jpg /data/local/tmp/tvbooks/huiben/ertao/1.jpg
+adb push  .\test\huiben\二桃杀三士\2.jpg /data/local/tmp/tvbooks/huiben/ertao/2.jpg
+adb push  .\test\huiben\二桃杀三士\3.jpg /data/local/tmp/tvbooks/huiben/ertao/3.jpg
+adb push  .\test\huiben\二桃杀三士\4.jpg /data/local/tmp/tvbooks/huiben/ertao/4.jpg
+
+adb push  .\test\huiben\二桃杀三士\1.mp3 /data/local/tmp/tvbooks/huiben/ertao/1.mp3
+adb push  .\test\huiben\二桃杀三士\2.mp3 /data/local/tmp/tvbooks/huiben/ertao/2.mp3
+adb push  .\test\huiben\二桃杀三士\3.mp3 /data/local/tmp/tvbooks/huiben/ertao/3.mp3
+adb push  .\test\huiben\二桃杀三士\4.mp3 /data/local/tmp/tvbooks/huiben/ertao/4.mp3
+
+
