@@ -450,7 +450,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
                 target = Math.min(target, max);
             }
             mediaPlayer.seekTo(target);
-            currentPlayMediaPos = target;
+            notifyAudioPositionChanged(target);
             if (progressBar != null) {
                 progressBar.setMax(Math.max(0, duration));
                 progressBar.setProgress(target);

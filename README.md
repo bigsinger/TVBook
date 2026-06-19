@@ -6,7 +6,7 @@ TVBook 是一个面向 Android 电视设备的离线绘本/音频播放器。把
 
 - 最低支持：Android 4.2 / API 17
 - 当前工程：`minSdkVersion 17`，`targetSdkVersion 28`
-- 当前版本：`versionName 1.4`，`versionCode 5`
+- 当前版本：`versionName 1.5`，`versionCode 6`
 - 本地 SDK：`D:\Android\Sdk`
 
 ## U 盘目录
@@ -69,7 +69,7 @@ tvbooks/
 - 控制栏显示后：`Left` / `Right` 在按钮间移动焦点，`OK/Enter` 执行当前按钮，`Back` 隐藏控制栏
 - `Bookmark` / `*`：收藏或取消收藏当前绘本
 
-自动播放时，绘本会等待“自动间隔”和当前页音频播放完成二者中更晚的时间点再翻页；最后一页会在到点后切到下一本。
+自动播放时，绘本会等待“自动间隔”和当前页音频播放完成二者中更晚的时间点再翻页；最后一页会在到点后切到下一本。手动翻页会立即废弃旧页面音频请求，避免旧音频完成回调影响新页面。
 
 音频播放：
 

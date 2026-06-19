@@ -351,6 +351,11 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     @Override
     protected void pausePlay() {
         super.pausePlay();
+        if (isAppPaused) {
+            cancelPendingAutoPage();
+        } else if (isAutoPlayMode) {
+            maybeAutoAdvance(autoPageToken);
+        }
         showPageInfo();
     }
 

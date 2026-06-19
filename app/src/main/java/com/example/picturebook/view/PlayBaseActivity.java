@@ -9,6 +9,7 @@ import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewParent;
@@ -32,8 +33,13 @@ public abstract class PlayBaseActivity extends Activity {
     private static final String AUTO_PLAY_KEY = "isAutoPlay";
     protected SharedPreferences mSP;
     private long lastBackPressedAt = 0;
-    private int earlyCompletionResumeCount = 0;
-    private boolean preparingAudioSource = false;
+    private int audioRequestSerial = 0;
+    private int activeAudioRequestSerial = 0;
+    private boolean activeAudioCompletionDelivered = false;
+    private int activeAudioDurationMs = 0;
+    private int activeAudioStartPositionMs = 0;
+    private long activeAudioStartedAtMs = 0;
+    private Runnable audioCompletionWatchdog = null;
 
     // App当前状态
     protected  boolean isAppPaused = false;
@@ -148,6 +154,7 @@ public abstract class PlayBaseActivity extends Activity {
 
     protected void release() {
         isAppPaused = true;
+        invalidateAudioRequest();
         if (updateUI != null) {
             handlerUpdateUI.removeCallbacks(updateUI);
         }
@@ -343,11 +350,16 @@ public abstract class PlayBaseActivity extends Activity {
                 }
                 mediaPlayer.pause();
                 isAppPaused = true;
+                markAudioPosition(currentPlayMediaPos);
+                cancelAudioCompletionWatchdog();
             } else if (isAppPaused) {
                 mediaPlayer.start();
                 isAppPaused = false;
+                markAudioPosition(currentPlayMediaPos);
+                scheduleAudioCompletionWatchdog(activeAudioRequestSerial);
             } else {
                 isAppPaused = true;
+                cancelAudioCompletionWatchdog();
             }
         } else {
             isAppPaused = !isAppPaused;
@@ -374,117 +386,179 @@ public abstract class PlayBaseActivity extends Activity {
 
 
     protected void playAudio(String audioFilePath) {
-        earlyCompletionResumeCount = 0;
-        preparingAudioSource = true;
+        final int requestSerial = ++audioRequestSerial;
+        activeAudioRequestSerial = requestSerial;
+        activeAudioCompletionDelivered = false;
+        activeAudioDurationMs = 0;
+        activeAudioStartPositionMs = Math.max(0, currentPlayMediaPos);
+        activeAudioStartedAtMs = 0;
+        cancelAudioCompletionWatchdog();
+        stopAndReleaseMediaPlayer();
+
         if (!new File(audioFilePath).exists()) {
             isAudioExistThisPage = false;
-            if (mediaPlayer != null) {
-                try {
-                    if (mediaPlayer.isPlaying()) {
-                        mediaPlayer.stop();
-                    }
-                    mediaPlayer.reset();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-            preparingAudioSource = false;
             return;
         } else {
             isAudioExistThisPage = true;
         }
 
         try {
-            if (mediaPlayer == null) {
-                mediaPlayer = new MediaPlayer();
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .setLegacyStreamType(AudioManager.STREAM_MUSIC)
-                            .build());
-                } else {
-                    mediaPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-                }
-
-                mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
-                    @Override
-                    public void onPrepared(MediaPlayer mp) {
-                        preparingAudioSource = false;
-                        int duration = mp.getDuration();
-                        if (currentPlayMediaPos > 0 && currentPlayMediaPos < duration - MIN_RESUME_REMAINING_MS) {
-                            mp.seekTo(currentPlayMediaPos);
-                        } else if (currentPlayMediaPos > 0) {
-                            currentPlayMediaPos = 0;
-                        }
-                        mp.start();
-                        isAppPaused = false;
-                        if (progressBar != null) {
-                            progressBar.setMax(duration);
-                        }
-                    }
-                });
-
-                mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                    @Override
-                    public void onCompletion(MediaPlayer mediaPlayer) {
-                        if (preparingAudioSource) {
-                            return;
-                        }
-                        if (!shouldAcceptCompletion(mediaPlayer)) {
-                            resumeAfterEarlyCompletion(mediaPlayer);
-                            return;
-                        }
-                        currentPlayMediaPos = 0;
-                        onAudioPlayCompletion();
-                    }
-                });
+            final MediaPlayer player = new MediaPlayer();
+            mediaPlayer = player;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                player.setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setLegacyStreamType(AudioManager.STREAM_MUSIC)
+                        .build());
             } else {
-                if (mediaPlayer.isPlaying()) {
-                    mediaPlayer.stop();
-                }
-                try {
-                    mediaPlayer.reset();
-                } catch (Exception e) {
-                    Toast.makeText(PlayBaseActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
-                }
+                player.setAudioStreamType(AudioManager.STREAM_MUSIC);
+            }
 
-            }
-            try {
-                mediaPlayer.setDataSource(audioFilePath);
-                mediaPlayer.prepareAsync();
-            } catch (Exception e) {
-                preparingAudioSource = false;
-                Toast.makeText(PlayBaseActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
-                //例如音频存在但是音频为空文件，就会有异常，也默认是播放完毕了
-                onAudioPlayCompletion();
-            }
+            player.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(MediaPlayer mp) {
+                    if (!isCurrentAudioRequest(requestSerial, mp)) {
+                        return;
+                    }
+                    int duration = mp.getDuration();
+                    if (currentPlayMediaPos > 0 && currentPlayMediaPos < duration - MIN_RESUME_REMAINING_MS) {
+                        mp.seekTo(currentPlayMediaPos);
+                    } else if (currentPlayMediaPos > 0) {
+                        currentPlayMediaPos = 0;
+                    }
+                    activeAudioDurationMs = Math.max(0, duration);
+                    markAudioPosition(currentPlayMediaPos);
+                    mp.start();
+                    isAppPaused = false;
+                    if (progressBar != null) {
+                        progressBar.setMax(duration);
+                    }
+                    scheduleAudioCompletionWatchdog(requestSerial);
+                }
+            });
+
+            player.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                @Override
+                public void onCompletion(MediaPlayer mp) {
+                    handleAudioCompletion(requestSerial, mp);
+                }
+            });
+
+            player.setDataSource(audioFilePath);
+            player.prepareAsync();
         } catch (Exception e) {
-            preparingAudioSource = false;
+            if (requestSerial == activeAudioRequestSerial) {
+                stopAndReleaseMediaPlayer();
+            }
             Toast.makeText(PlayBaseActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
+            deliverAudioCompletion(requestSerial);
         }
     }
 
-    private boolean shouldAcceptCompletion(MediaPlayer player) {
-        try {
-            int duration = player.getDuration();
-            int position = player.getCurrentPosition();
-            if (duration <= 0 || duration <= 4000) return true;
-            return position >= duration - COMPLETION_TOLERANCE_MS;
-        } catch (Exception e) {
-            return true;
-        }
+    protected void notifyAudioPositionChanged(int positionMs) {
+        currentPlayMediaPos = Math.max(0, positionMs);
+        markAudioPosition(currentPlayMediaPos);
+        scheduleAudioCompletionWatchdog(activeAudioRequestSerial);
     }
 
-    private void resumeAfterEarlyCompletion(MediaPlayer player) {
-        if (earlyCompletionResumeCount > 0 || isAppPaused) {
+    private boolean isCurrentAudioRequest(int requestSerial, MediaPlayer player) {
+        return requestSerial == activeAudioRequestSerial && player != null && player == mediaPlayer;
+    }
+
+    private void handleAudioCompletion(int requestSerial, MediaPlayer player) {
+        if (!isCurrentAudioRequest(requestSerial, player) || activeAudioCompletionDelivered) {
             return;
         }
-        earlyCompletionResumeCount++;
+        if (!hasReachedExpectedAudioEnd()) {
+            scheduleAudioCompletionWatchdog(requestSerial);
+            return;
+        }
+        deliverAudioCompletion(requestSerial);
+    }
+
+    private boolean hasReachedExpectedAudioEnd() {
+        if (activeAudioDurationMs <= 0 || activeAudioDurationMs <= 4000 || activeAudioStartedAtMs <= 0) {
+            return true;
+        }
+        long playedMs = activeAudioStartPositionMs + (SystemClock.elapsedRealtime() - activeAudioStartedAtMs);
+        return playedMs >= activeAudioDurationMs - COMPLETION_TOLERANCE_MS;
+    }
+
+    private void deliverAudioCompletion(int requestSerial) {
+        if (requestSerial != activeAudioRequestSerial || activeAudioCompletionDelivered) {
+            return;
+        }
+        activeAudioCompletionDelivered = true;
+        cancelAudioCompletionWatchdog();
+        currentPlayMediaPos = 0;
+        onAudioPlayCompletion();
+    }
+
+    private void scheduleAudioCompletionWatchdog(final int requestSerial) {
+        cancelAudioCompletionWatchdog();
+        if (requestSerial != activeAudioRequestSerial || activeAudioCompletionDelivered || isAppPaused || activeAudioDurationMs <= 0) {
+            return;
+        }
+        long playedMs = activeAudioStartPositionMs;
+        if (activeAudioStartedAtMs > 0) {
+            playedMs += SystemClock.elapsedRealtime() - activeAudioStartedAtMs;
+        }
+        long delayMs = activeAudioDurationMs - playedMs + COMPLETION_TOLERANCE_MS;
+        if (delayMs < 500) {
+            delayMs = 500;
+        }
+        audioCompletionWatchdog = new Runnable() {
+            @Override
+            public void run() {
+                audioCompletionWatchdog = null;
+                if (requestSerial != activeAudioRequestSerial || activeAudioCompletionDelivered || isAppPaused) {
+                    return;
+                }
+                deliverAudioCompletion(requestSerial);
+            }
+        };
+        handlerUpdateUI.postDelayed(audioCompletionWatchdog, delayMs);
+    }
+
+    private void cancelAudioCompletionWatchdog() {
+        if (audioCompletionWatchdog != null) {
+            handlerUpdateUI.removeCallbacks(audioCompletionWatchdog);
+            audioCompletionWatchdog = null;
+        }
+    }
+
+    private void markAudioPosition(int positionMs) {
+        activeAudioStartPositionMs = Math.max(0, positionMs);
+        activeAudioStartedAtMs = SystemClock.elapsedRealtime();
+    }
+
+    private void invalidateAudioRequest() {
+        activeAudioRequestSerial = ++audioRequestSerial;
+        activeAudioCompletionDelivered = true;
+        activeAudioDurationMs = 0;
+        activeAudioStartPositionMs = 0;
+        activeAudioStartedAtMs = 0;
+        cancelAudioCompletionWatchdog();
+    }
+
+    private void stopAndReleaseMediaPlayer() {
+        MediaPlayer player = mediaPlayer;
+        mediaPlayer = null;
+        if (player == null) {
+            return;
+        }
         try {
-            int position = Math.max(0, player.getCurrentPosition());
-            player.seekTo(position);
-            player.start();
+            player.setOnPreparedListener(null);
+            player.setOnCompletionListener(null);
+            if (player.isPlaying()) {
+                player.stop();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            player.release();
         } catch (Exception e) {
             e.printStackTrace();
         }
