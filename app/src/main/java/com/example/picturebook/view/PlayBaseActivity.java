@@ -33,6 +33,7 @@ public abstract class PlayBaseActivity extends Activity {
     protected SharedPreferences mSP;
     private long lastBackPressedAt = 0;
     private int earlyCompletionResumeCount = 0;
+    private boolean preparingAudioSource = false;
 
     // App当前状态
     protected  boolean isAppPaused = false;
@@ -112,6 +113,10 @@ public abstract class PlayBaseActivity extends Activity {
 
     protected int[] getControlButtonIds() {
         return new int[0];
+    }
+
+    protected boolean onFocusedControlKey(int keyCode, View focus) {
+        return false;
     }
 
     protected void focusPlaybackArea() {
@@ -241,6 +246,10 @@ public abstract class PlayBaseActivity extends Activity {
     }
 
     private boolean handleControlKey(int keyCode) {
+        View focus = getCurrentFocus();
+        if (onFocusedControlKey(keyCode, focus)) {
+            return true;
+        }
         switch (keyCode) {
             case KeyEvent.KEYCODE_MENU:
                 hideControls();
@@ -248,7 +257,6 @@ public abstract class PlayBaseActivity extends Activity {
                 return true;
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_DPAD_CENTER:
-                View focus = getCurrentFocus();
                 if (!isFocusInsideControls(focus)) {
                     focusDefaultControl();
                     focus = getCurrentFocus();
@@ -367,6 +375,7 @@ public abstract class PlayBaseActivity extends Activity {
 
     protected void playAudio(String audioFilePath) {
         earlyCompletionResumeCount = 0;
+        preparingAudioSource = true;
         if (!new File(audioFilePath).exists()) {
             isAudioExistThisPage = false;
             if (mediaPlayer != null) {
@@ -379,6 +388,7 @@ public abstract class PlayBaseActivity extends Activity {
                     e.printStackTrace();
                 }
             }
+            preparingAudioSource = false;
             return;
         } else {
             isAudioExistThisPage = true;
@@ -400,6 +410,7 @@ public abstract class PlayBaseActivity extends Activity {
                 mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                     @Override
                     public void onPrepared(MediaPlayer mp) {
+                        preparingAudioSource = false;
                         int duration = mp.getDuration();
                         if (currentPlayMediaPos > 0 && currentPlayMediaPos < duration - MIN_RESUME_REMAINING_MS) {
                             mp.seekTo(currentPlayMediaPos);
@@ -417,6 +428,9 @@ public abstract class PlayBaseActivity extends Activity {
                 mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
                     @Override
                     public void onCompletion(MediaPlayer mediaPlayer) {
+                        if (preparingAudioSource) {
+                            return;
+                        }
                         if (!shouldAcceptCompletion(mediaPlayer)) {
                             resumeAfterEarlyCompletion(mediaPlayer);
                             return;
@@ -440,11 +454,13 @@ public abstract class PlayBaseActivity extends Activity {
                 mediaPlayer.setDataSource(audioFilePath);
                 mediaPlayer.prepareAsync();
             } catch (Exception e) {
+                preparingAudioSource = false;
                 Toast.makeText(PlayBaseActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
                 //例如音频存在但是音频为空文件，就会有异常，也默认是播放完毕了
                 onAudioPlayCompletion();
             }
         } catch (Exception e) {
+            preparingAudioSource = false;
             Toast.makeText(PlayBaseActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
         }
     }

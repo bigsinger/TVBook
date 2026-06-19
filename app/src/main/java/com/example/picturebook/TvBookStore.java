@@ -38,11 +38,13 @@ public class TvBookStore {
         public final String type;
         public final String path;
         public final String title;
+        public final long addedAt;
 
-        public FavoriteItem(String type, String path, String title) {
+        public FavoriteItem(String type, String path, String title, long addedAt) {
             this.type = type;
             this.path = path;
             this.title = title;
+            this.addedAt = addedAt;
         }
     }
 
@@ -110,7 +112,8 @@ public class TvBookStore {
         String path = normalizePath(relativePath);
         String key = buildKey("fav", type + "\n" + path);
         if (favorite) {
-            props.setProperty(key, safe(type) + "\t" + safe(path) + "\t" + safe(title));
+            props.setProperty(key, safe(type) + "\t" + safe(path) + "\t" + safe(title)
+                    + "\t" + System.currentTimeMillis());
         } else {
             props.remove(key);
         }
@@ -124,12 +127,18 @@ public class TvBookStore {
             if (!key.startsWith("fav.")) continue;
             String[] parts = props.getProperty(key, "").split("\t", -1);
             if (parts.length < 3) continue;
-            items.add(new FavoriteItem(parts[0], normalizePath(parts[1]), parts[2]));
+            items.add(new FavoriteItem(parts[0], normalizePath(parts[1]), parts[2],
+                    parseLongPart(parts, 3, 0)));
         }
         Collections.sort(items, new Comparator<FavoriteItem>() {
             @Override
             public int compare(FavoriteItem left, FavoriteItem right) {
-                return left.title.compareToIgnoreCase(right.title);
+                if (left.addedAt > 0 && right.addedAt > 0 && left.addedAt != right.addedAt) {
+                    return left.addedAt < right.addedAt ? -1 : 1;
+                }
+                int titleCompare = left.title.compareToIgnoreCase(right.title);
+                if (titleCompare != 0) return titleCompare;
+                return left.path.compareToIgnoreCase(right.path);
             }
         });
         return items;
@@ -194,6 +203,15 @@ public class TvBookStore {
         if (parts == null || parts.length <= index) return defaultValue;
         try {
             return Integer.parseInt(parts[index]);
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private static long parseLongPart(String[] parts, int index, long defaultValue) {
+        if (parts == null || parts.length <= index) return defaultValue;
+        try {
+            return Long.parseLong(parts[index]);
         } catch (Exception e) {
             return defaultValue;
         }

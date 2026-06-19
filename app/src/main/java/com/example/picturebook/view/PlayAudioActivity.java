@@ -21,6 +21,9 @@ import java.util.List;
 
 public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickListener {
     public static final String EXTRA_AUDIO_NAME = "audio_name";
+    public static final String EXTRA_PLAYLIST_PATHS = "playlist_paths";
+    public static final String EXTRA_PLAYLIST_KEY = "playlist_key";
+    private static final int SEEK_STEP_MS = 10000;
 
     private List<String> audioFiles = new ArrayList<String>();
 
@@ -37,6 +40,9 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     private String thisFolderPath;
     private String currentFolderPath;
     private String targetAudioName;
+    private String rootPath;
+    private String playlistKey;
+    private boolean playlistMode = false;
     private Runnable pendingAutoNextRunnable;
 
     @Override
@@ -56,7 +62,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         progressBar = findViewById(R.id.progressBar);
         setControlsVisible(false);
 
-        String rootPath = Settings.getRootPath(this);
+        rootPath = Settings.getRootPath(this);
         if (rootPath == null) {
             Toast.makeText(PlayAudioActivity.this, "请插入包含 tvbooks 的U盘", Toast.LENGTH_SHORT).show();
             finish();
@@ -66,6 +72,12 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         Intent intent = getIntent();
         currentFolderPath = TvBookStore.normalizePath(intent.getType());
         targetAudioName = intent.getStringExtra(EXTRA_AUDIO_NAME);
+        String[] playlistPaths = intent.getStringArrayExtra(EXTRA_PLAYLIST_PATHS);
+        playlistMode = playlistPaths != null && playlistPaths.length > 0;
+        playlistKey = intent.getStringExtra(EXTRA_PLAYLIST_KEY);
+        if (playlistKey == null || playlistKey.length() == 0) {
+            playlistKey = "audio:" + currentFolderPath;
+        }
         File fileDir = new File(rootPath, currentFolderPath);
         thisFolderPath = fileDir.getAbsolutePath();
 
@@ -102,13 +114,32 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             }
         };
 
-        final File scanDir = fileDir;
-        new Thread(new Runnable() {
-            public void run() {
-                audioFiles = utils.getAllFilesOfDir(scanDir, false);
-                handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
+        if (playlistMode) {
+            audioFiles = buildAudioPlaylist(playlistPaths);
+            handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
+        } else {
+            final File scanDir = fileDir;
+            new Thread(new Runnable() {
+                public void run() {
+                    audioFiles = utils.getAllFilesOfDir(scanDir, false);
+                    handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
+                }
+            }).start();
+        }
+    }
+
+    private List<String> buildAudioPlaylist(String[] playlistPaths) {
+        List<String> paths = new ArrayList<String>();
+        if (playlistPaths == null) return paths;
+        for (String item : playlistPaths) {
+            String path = TvBookStore.normalizePath(item);
+            if (path.length() == 0) continue;
+            File file = new File(rootPath, path);
+            if (file.isFile()) {
+                paths.add(path);
             }
-        }).start();
+        }
+        return paths;
     }
 
     private void bindButtons() {
@@ -136,9 +167,10 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
 
         int mediaPos = 0;
         if (targetAudioName != null && targetAudioName.length() > 0) {
-            int index = audioFiles.indexOf(targetAudioName);
+            String target = playlistMode ? TvBookStore.normalizePath(targetAudioName) : targetAudioName;
+            int index = audioFiles.indexOf(target);
             currentPlayResIndex = index >= 0 ? index : 0;
-            TvBookStore.PlaybackState state = TvBookStore.readPlaybackState(this, playbackAudioKey(targetAudioName));
+            TvBookStore.PlaybackState state = TvBookStore.readPlaybackState(this, playbackAudioKey(currentAudioPath(target)));
             if (state.exists) {
                 mediaPos = state.mediaPos;
             }
@@ -185,12 +217,24 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
 
     @Override
     protected void onKeyDownLeftKey() {
+        showProgressForSeek();
+        seekBy(-SEEK_STEP_MS);
+    }
+
+    @Override
+    protected void onKeyDownRightKey() {
+        showProgressForSeek();
+        seekBy(SEEK_STEP_MS);
+    }
+
+    @Override
+    protected void onKeyDownUpKey() {
         currentPlayResIndex -= 2;
         turnNextRes(true);
     }
 
     @Override
-    protected void onKeyDownRightKey() {
+    protected void onKeyDownDownKey() {
         turnNextRes(true);
     }
 
@@ -229,7 +273,10 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             progressBar.setProgress(currentPlayMediaPos);
         }
         String audioFileName = audioFiles.get(currentPlayResIndex);
-        this.playAudio(new File(this.thisFolderPath, audioFileName).getAbsolutePath());
+        File audioFile = playlistMode
+                ? new File(rootPath, audioFileName)
+                : new File(this.thisFolderPath, audioFileName);
+        this.playAudio(audioFile.getAbsolutePath());
         showPageInfo();
         saveCurrentPlaybackState();
     }
@@ -246,17 +293,18 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             }
         }
         String audioFileName = audioFiles.get(currentPlayResIndex);
+        String audioPath = currentAudioPath(audioFileName);
         TvBookStore.savePlaybackState(this, playbackFolderKey(), currentPlayResIndex, 1, currentPlayMediaPos);
-        TvBookStore.savePlaybackState(this, playbackAudioKey(audioFileName), currentPlayResIndex, 1, currentPlayMediaPos);
+        TvBookStore.savePlaybackState(this, playbackAudioKey(audioPath), currentPlayResIndex, 1, currentPlayMediaPos);
     }
 
     @Override
     protected boolean toggleFavorite() {
         if (audioFiles == null || audioFiles.size() == 0 || currentPlayResIndex >= audioFiles.size()) return false;
         String audioFileName = audioFiles.get(currentPlayResIndex);
-        String path = currentFolderPath + "/" + audioFileName;
+        String path = currentAudioPath(audioFileName);
         boolean favorite = !TvBookStore.isFavorite(this, TvBookStore.TYPE_AUDIO, path);
-        TvBookStore.setFavorite(this, TvBookStore.TYPE_AUDIO, path, audioFileName, favorite);
+        TvBookStore.setFavorite(this, TvBookStore.TYPE_AUDIO, path, TvBookStore.fileName(path), favorite);
         showPageInfo();
         Toast.makeText(this, favorite ? "已收藏" : "已取消收藏", Toast.LENGTH_SHORT).show();
         return true;
@@ -288,12 +336,40 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     @Override
     protected int[] getControlButtonIds() {
         return new int[]{
+                R.id.progressBar,
                 R.id.btnPrePage,
                 R.id.btnNextPage,
                 R.id.btnPlayPause,
                 R.id.btnFavorite,
                 R.id.btnChangePlayMode
         };
+    }
+
+    @Override
+    protected boolean onFocusedControlKey(int keyCode, View focus) {
+        if (focus != null && focus.getId() == R.id.progressBar) {
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
+                seekBy(-SEEK_STEP_MS);
+                return true;
+            }
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+                seekBy(SEEK_STEP_MS);
+                return true;
+            }
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN && btnPlayPause != null) {
+                btnPlayPause.requestFocus();
+                return true;
+            }
+            return false;
+        }
+        if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP
+                && progressBar != null
+                && viewPlayerControls != null
+                && viewPlayerControls.getVisibility() == View.VISIBLE) {
+            progressBar.requestFocus();
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -329,13 +405,15 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             return;
         }
         String audioFileName = audioFiles.get(currentPlayResIndex);
-        boolean favorite = TvBookStore.isFavorite(this, TvBookStore.TYPE_AUDIO, currentFolderPath + "/" + audioFileName);
-        txtAudioName.setText(audioFileName);
+        String audioPath = currentAudioPath(audioFileName);
+        String title = TvBookStore.fileName(audioPath);
+        boolean favorite = TvBookStore.isFavorite(this, TvBookStore.TYPE_AUDIO, audioPath);
+        txtAudioName.setText(title);
         String meta = (currentPlayResIndex + 1) + " / " + audioFiles.size()
                 + "   " + (favorite ? "已收藏" : "未收藏")
                 + "   " + (isAutoPlayMode ? "自动" : "手动");
         txtAudioMeta.setText(meta);
-        txtAudioStatus.setText(audioFileName + "   " + meta);
+        txtAudioStatus.setText(title + "   " + meta);
         if (btnFavorite != null) {
             btnFavorite.setText(favorite ? "已收藏" : "收藏");
         }
@@ -349,11 +427,46 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     }
 
     private String playbackFolderKey() {
-        return "audio:" + currentFolderPath;
+        return playlistMode ? "audio-list:" + playlistKey : "audio:" + currentFolderPath;
     }
 
-    private String playbackAudioKey(String audioFileName) {
-        return "audio-item:" + currentFolderPath + "/" + audioFileName;
+    private String playbackAudioKey(String audioPath) {
+        return "audio-item:" + TvBookStore.normalizePath(audioPath);
+    }
+
+    private String currentAudioPath(String audioFileName) {
+        String safeName = TvBookStore.normalizePath(audioFileName);
+        return playlistMode ? safeName : currentFolderPath + "/" + safeName;
+    }
+
+    private void seekBy(int deltaMs) {
+        if (mediaPlayer == null) return;
+        try {
+            int duration = mediaPlayer.getDuration();
+            int position = mediaPlayer.getCurrentPosition();
+            int max = duration > 1000 ? duration - 500 : duration;
+            int target = Math.max(0, position + deltaMs);
+            if (max > 0) {
+                target = Math.min(target, max);
+            }
+            mediaPlayer.seekTo(target);
+            currentPlayMediaPos = target;
+            if (progressBar != null) {
+                progressBar.setMax(Math.max(0, duration));
+                progressBar.setProgress(target);
+            }
+            updateProgressText();
+            saveCurrentPlaybackState();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void showProgressForSeek() {
+        setControlsVisible(true);
+        if (progressBar != null) {
+            progressBar.requestFocus();
+        }
     }
 
     private void setControlsVisible(boolean visible) {

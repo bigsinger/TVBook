@@ -67,6 +67,8 @@ public class MainActivity extends Activity implements View.OnClickListener, View
 
     private final List<MenuEntry> menuEntries = new ArrayList<MenuEntry>();
     private MenuEntry currentMenuEntry;
+    private boolean showingFavoriteList = false;
+    private boolean suppressMenuFocusRender = false;
 
     private static class MenuEntry {
         final String title;
@@ -93,9 +95,13 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         final String targetName;
         final boolean h5;
         final TvBookStore.FavoriteItem favoriteItem;
+        final boolean favoriteGroup;
+        final String favoriteScopeType;
+        final String favoriteScopePath;
 
         ContentEntry(String title, String subtitle, String type, String path, String targetName, boolean h5,
-                     TvBookStore.FavoriteItem favoriteItem) {
+                     TvBookStore.FavoriteItem favoriteItem, boolean favoriteGroup, String favoriteScopeType,
+                     String favoriteScopePath) {
             this.title = title;
             this.subtitle = subtitle;
             this.type = type;
@@ -103,6 +109,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             this.targetName = targetName;
             this.h5 = h5;
             this.favoriteItem = favoriteItem;
+            this.favoriteGroup = favoriteGroup;
+            this.favoriteScopeType = favoriteScopeType;
+            this.favoriteScopePath = favoriteScopePath;
         }
     }
 
@@ -143,6 +152,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
 
         isAutoPlayMode = TvBookStore.getBooleanSetting(this, AUTO_PLAY_KEY, mSP.getBoolean(AUTO_PLAY_KEY, true));
         Settings.delaySecondsPerAudio = TvBookStore.getIntSetting(this, DELAY_AUDIO_KEY, mSP.getInt(DELAY_AUDIO_KEY, 4));
+        Settings.delaySecondsPerPage = Settings.delaySecondsPerAudio;
         refreshSettingsText();
 
         initMenu();
@@ -233,7 +243,8 @@ public class MainActivity extends Activity implements View.OnClickListener, View
 
     private void renderContent(MenuEntry entry) {
         currentMenuEntry = entry;
-        viewSubMenu.removeAllViews();
+        showingFavoriteList = false;
+        clearSubMenuViews();
 
         List<ContentEntry> contentEntries = buildContentEntries(entry);
         txtSectionTitle.setText(entry == null ? "内容" : entry.title);
@@ -260,21 +271,26 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             for (TvBookStore.FavoriteItem item : favorites) {
                 String label = TvBookStore.TYPE_AUDIO.equals(item.type) ? "音频" : "绘本";
                 entries.add(new ContentEntry(item.title, label + " · " + item.path, item.type,
-                        TvBookStore.parentPath(item.path), TvBookStore.fileName(item.path), false, item));
+                        TvBookStore.parentPath(item.path), TvBookStore.fileName(item.path), false, item,
+                        false, item.type, ""));
             }
             return entries;
         }
 
         if (entry.h5) {
-            entries.add(new ContentEntry("打开 H5 在线绘本", "使用内置 WebView 播放在线绘本", "h5", "", null, true, null));
+            entries.add(new ContentEntry("打开 H5 在线绘本", "使用内置 WebView 播放在线绘本",
+                    "h5", "", null, true, null, false, null, null));
             return entries;
         }
+
+        addFavoriteGroup(entries, entry.type, entry.path);
 
         if (!entry.subMenus.isEmpty()) {
             for (String subMenu : entry.subMenus) {
                 String path = entry.path + "/" + subMenu;
                 String subtitle = buildFolderSubtitle(entry.type, path);
-                entries.add(new ContentEntry(subMenu, subtitle, entry.type, path, null, false, null));
+                entries.add(new ContentEntry(subMenu, subtitle, entry.type, path, null, false, null,
+                        false, null, null));
             }
             return entries;
         }
@@ -283,8 +299,16 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         String subtitle = snapshot.exists
                 ? buildFolderSubtitle(entry.type, entry.path)
                 : "目录未同步，可按 Menu 或右侧同步按钮";
-        entries.add(new ContentEntry("播放全部", subtitle, entry.type, entry.path, null, false, null));
+        entries.add(new ContentEntry("播放全部", subtitle, entry.type, entry.path, null, false, null,
+                false, null, null));
         return entries;
+    }
+
+    private void addFavoriteGroup(List<ContentEntry> entries, String type, String scopePath) {
+        List<TvBookStore.FavoriteItem> favorites = filterFavorites(type, scopePath);
+        String label = TvBookStore.TYPE_AUDIO.equals(type) ? "音频收藏" : "绘本收藏";
+        entries.add(new ContentEntry("我的收藏", label + " · " + favorites.size() + " 项",
+                type, scopePath, null, false, null, true, type, scopePath));
     }
 
     private String buildFolderSubtitle(String type, String path) {
@@ -357,8 +381,13 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             startActivity(new Intent(MainActivity.this, PlayH5Activity.class));
             return;
         }
+        if (entry.favoriteGroup) {
+            renderFavoriteList(entry.favoriteScopeType, entry.favoriteScopePath);
+            focusFirstContent();
+            return;
+        }
         if (entry.favoriteItem != null) {
-            startFavorite(entry.favoriteItem);
+            startFavorite(entry);
             return;
         }
         TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, entry.type, entry.path);
@@ -380,6 +409,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
 
         if (value != Settings.delaySecondsPerAudio) {
             Settings.delaySecondsPerAudio = value;
+            Settings.delaySecondsPerPage = value;
             refreshSettingsText();
             saveSetting(DELAY_AUDIO_KEY, Integer.toString(value));
         }
@@ -445,6 +475,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     public void onFocusChange(View v, boolean hasFocus) {
         Object tag = v.getTag();
         if (tag instanceof MenuEntry) {
+            if (suppressMenuFocusRender) {
+                return;
+            }
             Button button = (Button) v;
             if (hasFocus) {
                 selectMenuButton(v);
@@ -455,6 +488,15 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         } else if (tag instanceof ContentEntry) {
             TextView textView = (TextView) v;
             textView.setTextColor(hasFocus ? Color.WHITE : Color.rgb(210, 210, 210));
+        }
+    }
+
+    private void clearSubMenuViews() {
+        suppressMenuFocusRender = true;
+        try {
+            viewSubMenu.removeAllViews();
+        } finally {
+            suppressMenuFocusRender = false;
         }
     }
 
@@ -497,16 +539,90 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         return false;
     }
 
-    private void startFavorite(TvBookStore.FavoriteItem item) {
-        if (TvBookStore.TYPE_AUDIO_IMAGE.equals(item.type)) {
-            String folder = TvBookStore.parentPath(item.path);
-            String bookName = TvBookStore.fileName(item.path);
-            startContent(item.type, folder, bookName);
-        } else if (TvBookStore.TYPE_AUDIO.equals(item.type)) {
-            String folder = TvBookStore.parentPath(item.path);
-            String audioName = TvBookStore.fileName(item.path);
-            startContent(item.type, folder, audioName);
+    private void renderFavoriteList(String type, String scopePath) {
+        showingFavoriteList = true;
+        clearSubMenuViews();
+
+        String safeScope = TvBookStore.normalizePath(scopePath);
+        List<TvBookStore.FavoriteItem> favorites = filterFavorites(type, safeScope);
+        txtSectionTitle.setText(safeScope.length() == 0
+                ? "我的收藏"
+                : TvBookStore.fileName(safeScope) + " · 我的收藏");
+        txtSectionCount.setText(favorites.size() + " 项");
+        refreshStatusText(currentMenuEntry);
+
+        if (favorites.isEmpty()) {
+            addEmptyContent("暂无收藏");
+            return;
         }
+
+        for (TvBookStore.FavoriteItem item : favorites) {
+            String label = TvBookStore.TYPE_AUDIO.equals(item.type) ? "音频" : "绘本";
+            ContentEntry contentEntry = new ContentEntry(item.title, label + " · " + item.path,
+                    item.type, TvBookStore.parentPath(item.path), TvBookStore.fileName(item.path),
+                    false, item, false, type, safeScope);
+            viewSubMenu.addView(createContentView(contentEntry));
+        }
+    }
+
+    private void startFavorite(ContentEntry entry) {
+        TvBookStore.FavoriteItem item = entry.favoriteItem;
+        String type = entry.favoriteScopeType == null || entry.favoriteScopeType.length() == 0
+                ? item.type
+                : entry.favoriteScopeType;
+        String scopePath = entry.favoriteScopePath == null ? "" : entry.favoriteScopePath;
+        startFavoritePlaylist(type, scopePath, item.path);
+    }
+
+    private void startFavoritePlaylist(String type, String scopePath, String targetPath) {
+        List<TvBookStore.FavoriteItem> favorites = filterFavorites(type, scopePath);
+        if (favorites.size() == 0) {
+            Toast.makeText(this, "暂无收藏", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] paths = new String[favorites.size()];
+        for (int i = 0; i < favorites.size(); i++) {
+            paths[i] = favorites.get(i).path;
+        }
+
+        String safeScope = TvBookStore.normalizePath(scopePath);
+        String playlistKey = safeScope.length() == 0
+                ? "favorites:" + type + ":global"
+                : "favorites:" + type + ":" + safeScope;
+        Intent intent;
+        if (TvBookStore.TYPE_AUDIO_IMAGE.equals(type)) {
+            intent = new Intent(MainActivity.this, PlayHuibenActivity.class).setType(safeScope);
+            intent.putExtra(PlayHuibenActivity.EXTRA_PLAYLIST_PATHS, paths);
+            intent.putExtra(PlayHuibenActivity.EXTRA_PLAYLIST_KEY, playlistKey);
+            if (targetPath != null) {
+                intent.putExtra(PlayHuibenActivity.EXTRA_BOOK_NAME, TvBookStore.normalizePath(targetPath));
+            }
+            startActivity(intent);
+        } else if (TvBookStore.TYPE_AUDIO.equals(type)) {
+            intent = new Intent(MainActivity.this, PlayAudioActivity.class).setType(safeScope);
+            intent.putExtra(PlayAudioActivity.EXTRA_PLAYLIST_PATHS, paths);
+            intent.putExtra(PlayAudioActivity.EXTRA_PLAYLIST_KEY, playlistKey);
+            if (targetPath != null) {
+                intent.putExtra(PlayAudioActivity.EXTRA_AUDIO_NAME, TvBookStore.normalizePath(targetPath));
+            }
+            startActivity(intent);
+        }
+    }
+
+    private List<TvBookStore.FavoriteItem> filterFavorites(String type, String scopePath) {
+        List<TvBookStore.FavoriteItem> filtered = new ArrayList<TvBookStore.FavoriteItem>();
+        String safeScope = TvBookStore.normalizePath(scopePath);
+        List<TvBookStore.FavoriteItem> favorites = TvBookStore.getFavorites(this);
+        for (TvBookStore.FavoriteItem item : favorites) {
+            if (!type.equals(item.type)) continue;
+            if (safeScope.length() == 0
+                    || item.path.equals(safeScope)
+                    || item.path.startsWith(safeScope + "/")) {
+                filtered.add(item);
+            }
+        }
+        return filtered;
     }
 
     private void startContent(String type, String path, String targetName) {
@@ -557,6 +673,11 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (showingFavoriteList) {
+                renderContent(currentMenuEntry);
+                focusFirstContent();
+                return true;
+            }
             if ((System.currentTimeMillis() - exitTime) > 1000) {
                 Toast.makeText(getApplicationContext(), "再按一次退出程序", Toast.LENGTH_SHORT).show();
                 exitTime = System.currentTimeMillis();

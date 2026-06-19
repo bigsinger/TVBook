@@ -24,6 +24,8 @@ import java.util.List;
 
 public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClickListener {
     public static final String EXTRA_BOOK_NAME = "book_name";
+    public static final String EXTRA_PLAYLIST_PATHS = "playlist_paths";
+    public static final String EXTRA_PLAYLIST_KEY = "playlist_key";
 
     private static final String TAG = "PlayHuibenActivity";
     private ImageView imageView;
@@ -36,10 +38,16 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     private Button btnFavorite;
     private Button btnChangePlayMode;
     private Runnable pendingAutoPageRunnable;
+    private int autoPageToken = 0;
+    private long currentPageStartedAt = 0;
+    private boolean currentPageAudioFinished = true;
 
     private String currentBookType = null;
     private String currentBookName = null;
     private String targetBookName = null;
+    private String rootPath = null;
+    private String playlistKey = null;
+    private boolean playlistMode = false;
     private List<String> bookNames = new ArrayList<String>();
     private int currentBookPageCount = 1;
 
@@ -48,7 +56,7 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_play_huiben);
 
-        String rootPath = Settings.getRootPath(this);
+        rootPath = Settings.getRootPath(this);
         if (rootPath == null) {
             Toast.makeText(PlayHuibenActivity.this, "请插入包含 tvbooks 的U盘", Toast.LENGTH_SHORT).show();
             finish();
@@ -70,15 +78,12 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         Intent intent = getIntent();
         currentBookType = TvBookStore.normalizePath(intent.getType());
         targetBookName = intent.getStringExtra(EXTRA_BOOK_NAME);
-
-        updateUI = new Runnable() {
-            @Override
-            public void run() {
-                if (isAutoPlayMode && !isAudioExistThisPage) {
-                    turnNextPage(false);
-                }
-            }
-        };
+        String[] playlistPaths = intent.getStringArrayExtra(EXTRA_PLAYLIST_PATHS);
+        playlistMode = playlistPaths != null && playlistPaths.length > 0;
+        playlistKey = intent.getStringExtra(EXTRA_PLAYLIST_KEY);
+        if (playlistKey == null || playlistKey.length() == 0) {
+            playlistKey = "book:" + currentBookType;
+        }
 
         handler = new Handler() {
             @Override
@@ -90,13 +95,32 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
             }
         };
 
-        final File bookTypeDir = new File(rootPath, currentBookType);
-        new Thread(new Runnable() {
-            public void run() {
-                bookNames = utils.getAllFilesOfDir(bookTypeDir, true);
-                handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
+        if (playlistMode) {
+            bookNames = buildBookPlaylist(playlistPaths);
+            handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
+        } else {
+            final File bookTypeDir = new File(rootPath, currentBookType);
+            new Thread(new Runnable() {
+                public void run() {
+                    bookNames = utils.getAllFilesOfDir(bookTypeDir, true);
+                    handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
+                }
+            }).start();
+        }
+    }
+
+    private List<String> buildBookPlaylist(String[] playlistPaths) {
+        List<String> paths = new ArrayList<String>();
+        if (playlistPaths == null) return paths;
+        for (String item : playlistPaths) {
+            String path = TvBookStore.normalizePath(item);
+            if (path.length() == 0) continue;
+            File dir = new File(rootPath, path);
+            if (dir.isDirectory()) {
+                paths.add(path);
             }
-        }).start();
+        }
+        return paths;
     }
 
     private void restoreStartPosition() {
@@ -109,9 +133,10 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         int startPage = 1;
         int startMediaPos = 0;
         if (targetBookName != null && targetBookName.length() > 0) {
-            int index = bookNames.indexOf(targetBookName);
+            String target = playlistMode ? TvBookStore.normalizePath(targetBookName) : targetBookName;
+            int index = bookNames.indexOf(target);
             currentPlayResIndex = index >= 0 ? index : 0;
-            TvBookStore.PlaybackState state = TvBookStore.readPlaybackState(this, playbackBookKey(targetBookName));
+            TvBookStore.PlaybackState state = TvBookStore.readPlaybackState(this, playbackBookKeyFromPath(bookPathForItem(target)));
             if (state.exists) {
                 startPage = Math.max(1, state.pageIndex);
                 startMediaPos = state.mediaPos;
@@ -140,7 +165,14 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         if (currentPlayResIndex < 0 || currentPlayResIndex >= bookNames.size()) {
             currentPlayResIndex = 0;
         }
-        currentBookName = bookNames.get(currentPlayResIndex).trim();
+        String item = bookNames.get(currentPlayResIndex).trim();
+        if (playlistMode) {
+            String bookPath = TvBookStore.normalizePath(item);
+            currentBookType = TvBookStore.parentPath(bookPath);
+            currentBookName = TvBookStore.fileName(bookPath);
+        } else {
+            currentBookName = item;
+        }
         currentPlayPageIndex = Math.max(1, pageIndex);
         currentBookPageCount = Math.max(1, countPagesForBook(currentBookName));
         playCurrentPage(mediaPos);
@@ -148,17 +180,21 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
 
     private void playCurrentPage(int mediaPos) {
         cancelPendingAutoPage();
+        final int pageToken = ++autoPageToken;
+        currentPageStartedAt = System.currentTimeMillis();
         currentPlayMediaPos = Math.max(0, mediaPos);
-        File pageImageFile = new File(Settings.getRootPath(this), currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".jpg");
-        File pageAudioFile = new File(Settings.getRootPath(this), currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".mp3");
+        File pageImageFile = new File(rootPath, currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".jpg");
+        File pageAudioFile = new File(rootPath, currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".mp3");
+        currentPageAudioFinished = !pageAudioFile.exists();
         showPageImage(pageImageFile.getAbsolutePath());
         showPageInfo();
         playAudio(pageAudioFile.getAbsolutePath());
+        if (!isAudioExistThisPage) {
+            currentPageAudioFinished = true;
+        }
         lastChangeTime = System.currentTimeMillis();
         saveCurrentPlaybackState();
-
-        handlerUpdateUI.removeCallbacks(updateUI);
-        handlerUpdateUI.postDelayed(updateUI, Settings.getDelaySecondsPerPage() * 1000L);
+        scheduleAutoPageCheck(pageToken, autoDelayMillis());
     }
 
     @Override
@@ -180,6 +216,11 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         } else if (id == R.id.btnChangePlayMode) {
             isAutoPlayMode = !isAutoPlayMode;
             TvBookStore.putSetting(this, "isAutoPlay", Boolean.toString(isAutoPlayMode));
+            if (isAutoPlayMode) {
+                maybeAutoAdvance(autoPageToken);
+            } else {
+                cancelPendingAutoPage();
+            }
             showPageInfo();
         }
     }
@@ -204,22 +245,8 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
 
     @Override
     protected void onAudioPlayCompletion() {
-        if (!isAppPaused && isAutoPlayMode) {
-            cancelPendingAutoPage();
-            final int completedBookIndex = currentPlayResIndex;
-            final int completedPageIndex = currentPlayPageIndex;
-            pendingAutoPageRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    if (!isAppPaused && isAutoPlayMode
-                            && currentPlayResIndex == completedBookIndex
-                            && currentPlayPageIndex == completedPageIndex) {
-                        turnNextPage(false);
-                    }
-                }
-            };
-            handlerUpdateUI.postDelayed(pendingAutoPageRunnable, Settings.getDelaySecondsPerAudio() * 1000L);
-        }
+        currentPageAudioFinished = true;
+        maybeAutoAdvance(autoPageToken);
     }
 
     @Override
@@ -229,16 +256,9 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
 
     @Override
     protected synchronized void turnNextPage(boolean isManualClick) {
-        if (!isManualClick) {
-            long deltaTime = (System.currentTimeMillis() - lastChangeTime) / 1000;
-            if (deltaTime < 3) {
-                return;
-            }
-        }
-
         currentPlayPageIndex++;
-        File pageImageFile = new File(Settings.getRootPath(this), currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".jpg");
-        File pageAudioFile = new File(Settings.getRootPath(this), currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".mp3");
+        File pageImageFile = new File(rootPath, currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".jpg");
+        File pageAudioFile = new File(rootPath, currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".mp3");
         if (!pageImageFile.exists() && !pageAudioFile.exists()) {
             currentPlayPageIndex--;
             if (isManualClick) {
@@ -341,11 +361,20 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     }
 
     private String playbackCategoryKey() {
-        return "book:" + currentBookType;
+        return playlistMode ? "book-list:" + playlistKey : "book:" + currentBookType;
     }
 
     private String playbackBookKey(String bookName) {
-        return "book-item:" + currentBookType + "/" + bookName;
+        return playbackBookKeyFromPath(currentBookType + "/" + bookName);
+    }
+
+    private String playbackBookKeyFromPath(String bookPath) {
+        return "book-item:" + TvBookStore.normalizePath(bookPath);
+    }
+
+    private String bookPathForItem(String item) {
+        String safe = TvBookStore.normalizePath(item);
+        return playlistMode ? safe : currentBookType + "/" + safe;
     }
 
     private void showPageImage(String imageFilePath) {
@@ -391,6 +420,41 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
             handlerUpdateUI.removeCallbacks(pendingAutoPageRunnable);
             pendingAutoPageRunnable = null;
         }
+    }
+
+    private long autoDelayMillis() {
+        return Math.max(0, Settings.getDelaySecondsPerAudio()) * 1000L;
+    }
+
+    private void scheduleAutoPageCheck(final int pageToken, long delayMillis) {
+        cancelPendingAutoPage();
+        if (!isAutoPlayMode || isAppPaused) {
+            return;
+        }
+        pendingAutoPageRunnable = new Runnable() {
+            @Override
+            public void run() {
+                pendingAutoPageRunnable = null;
+                maybeAutoAdvance(pageToken);
+            }
+        };
+        handlerUpdateUI.postDelayed(pendingAutoPageRunnable, Math.max(0, delayMillis));
+    }
+
+    private void maybeAutoAdvance(int pageToken) {
+        if (pageToken != autoPageToken || !isAutoPlayMode || isAppPaused) {
+            return;
+        }
+        long intervalMillis = autoDelayMillis();
+        long elapsedMillis = System.currentTimeMillis() - currentPageStartedAt;
+        if (elapsedMillis < intervalMillis) {
+            scheduleAutoPageCheck(pageToken, intervalMillis - elapsedMillis);
+            return;
+        }
+        if (!currentPageAudioFinished) {
+            return;
+        }
+        turnNextPage(false);
     }
 
     private void updatePageProgress() {
