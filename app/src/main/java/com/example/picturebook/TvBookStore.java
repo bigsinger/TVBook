@@ -18,6 +18,7 @@ public class TvBookStore {
     private static final String SETTINGS_FILE = "settings.properties";
     private static final String PLAYBACK_FILE = "playback.properties";
     private static final String FAVORITES_FILE = "favorites.properties";
+    private static final String CATALOG_FILE = "catalog.properties";
 
     public static class PlaybackState {
         public final boolean exists;
@@ -42,6 +43,20 @@ public class TvBookStore {
             this.type = type;
             this.path = path;
             this.title = title;
+        }
+    }
+
+    public static class CatalogSnapshot {
+        public final boolean exists;
+        public final int count;
+        public final List<String> names;
+        public final long updatedAt;
+
+        public CatalogSnapshot(boolean exists, int count, List<String> names, long updatedAt) {
+            this.exists = exists;
+            this.count = count;
+            this.names = names == null ? new ArrayList<String>() : names;
+            this.updatedAt = updatedAt;
         }
     }
 
@@ -120,6 +135,40 @@ public class TvBookStore {
         return items;
     }
 
+    public static CatalogSnapshot readCatalog(Context context, String type, String relativePath) {
+        Properties props = loadProperties(context, CATALOG_FILE);
+        String key = catalogKey(type, relativePath);
+        String countValue = props.getProperty(key + ".count");
+        String namesValue = props.getProperty(key + ".names");
+        if (countValue == null && namesValue == null) {
+            return new CatalogSnapshot(false, 0, new ArrayList<String>(), 0);
+        }
+        List<String> names = splitNames(namesValue);
+        return new CatalogSnapshot(true,
+                parseIntValue(countValue, names.size()),
+                names,
+                parseLongValue(props.getProperty(key + ".updatedAt"), 0));
+    }
+
+    public static boolean saveCatalog(Context context, String type, String relativePath, List<String> names) {
+        Properties props = loadProperties(context, CATALOG_FILE);
+        String key = catalogKey(type, relativePath);
+        List<String> safeNames = names == null ? new ArrayList<String>() : names;
+        props.setProperty(key + ".count", Integer.toString(safeNames.size()));
+        props.setProperty(key + ".names", joinNames(safeNames));
+        props.setProperty(key + ".updatedAt", Long.toString(System.currentTimeMillis()));
+        return storeProperties(context, CATALOG_FILE, props, "TVBook catalog");
+    }
+
+    public static boolean saveCatalogCount(Context context, String type, String relativePath, int count) {
+        Properties props = loadProperties(context, CATALOG_FILE);
+        String key = catalogKey(type, relativePath);
+        props.setProperty(key + ".count", Integer.toString(Math.max(0, count)));
+        props.remove(key + ".names");
+        props.setProperty(key + ".updatedAt", Long.toString(System.currentTimeMillis()));
+        return storeProperties(context, CATALOG_FILE, props, "TVBook catalog");
+    }
+
     public static String normalizePath(String path) {
         if (path == null) return "";
         path = path.replace("\\", "/").trim();
@@ -150,8 +199,54 @@ public class TvBookStore {
         }
     }
 
+    private static int parseIntValue(String value, int defaultValue) {
+        if (value == null) return defaultValue;
+        try {
+            return Integer.parseInt(value);
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private static long parseLongValue(String value, long defaultValue) {
+        if (value == null) return defaultValue;
+        try {
+            return Long.parseLong(value);
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value.replace('\t', ' ').replace('\n', ' ');
+    }
+
+    private static String catalogKey(String type, String relativePath) {
+        return buildKey("catalog", safe(type) + "\n" + normalizePath(relativePath));
+    }
+
+    private static String joinNames(List<String> names) {
+        StringBuilder builder = new StringBuilder();
+        for (String name : names) {
+            if (name == null) continue;
+            if (builder.length() > 0) {
+                builder.append('\t');
+            }
+            builder.append(safe(name));
+        }
+        return builder.toString();
+    }
+
+    private static List<String> splitNames(String value) {
+        List<String> names = new ArrayList<String>();
+        if (value == null || value.length() == 0) return names;
+        String[] parts = value.split("\\t", -1);
+        for (String part : parts) {
+            if (part != null && part.length() > 0) {
+                names.add(part);
+            }
+        }
+        return names;
     }
 
     private static synchronized Properties loadProperties(Context context, String fileName) {

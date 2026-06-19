@@ -27,6 +27,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     private TextView txtAudioName;
     private TextView txtAudioMeta;
     private TextView txtAudioStatus;
+    private TextView txtAudioCover;
     private TextView txtProgressCurrent;
     private TextView txtProgressTotal;
     private LinearLayout viewPlayerControls;
@@ -36,6 +37,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     private String thisFolderPath;
     private String currentFolderPath;
     private String targetAudioName;
+    private Runnable pendingAutoNextRunnable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,6 +46,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         txtAudioName = findViewById(R.id.txtAudioName);
         txtAudioMeta = findViewById(R.id.txtAudioMeta);
         txtAudioStatus = findViewById(R.id.txtAudioStatus);
+        txtAudioCover = findViewById(R.id.txtAudioCover);
         txtProgressCurrent = findViewById(R.id.txtProgressCurrent);
         txtProgressTotal = findViewById(R.id.txtProgressTotal);
         viewPlayerControls = findViewById(R.id.viewPlayerControls);
@@ -155,14 +158,17 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     @Override
     protected void onAudioPlayCompletion() {
         if (isAutoPlayMode) {
-            new Handler().postDelayed(new Runnable() {
+            cancelPendingAutoNext();
+            final int completedIndex = currentPlayResIndex;
+            pendingAutoNextRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    if (!isAppPaused) {
+                    if (!isAppPaused && isAutoPlayMode && currentPlayResIndex == completedIndex) {
                         handler.sendEmptyMessage(MSG_PLAY_NEXT);
                     }
                 }
-            }, Settings.getDelaySecondsPerAudio() * 1000L);
+            };
+            handlerUpdateUI.postDelayed(pendingAutoNextRunnable, Settings.getDelaySecondsPerAudio() * 1000L);
         }
     }
 
@@ -211,6 +217,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         if (audioFiles == null || audioFiles.size() == 0) {
             return;
         }
+        cancelPendingAutoNext();
         if (currentPlayResIndex < 0) {
             currentPlayResIndex = audioFiles.size() - 1;
         }
@@ -218,6 +225,9 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             currentPlayResIndex = 0;
         }
         currentPlayMediaPos = Math.max(0, mediaPos);
+        if (progressBar != null) {
+            progressBar.setProgress(currentPlayMediaPos);
+        }
         String audioFileName = audioFiles.get(currentPlayResIndex);
         this.playAudio(new File(this.thisFolderPath, audioFileName).getAbsolutePath());
         showPageInfo();
@@ -260,17 +270,63 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     }
 
     @Override
+    protected boolean hideControls() {
+        setControlsVisible(false);
+        return true;
+    }
+
+    @Override
+    protected View getControlsView() {
+        return viewPlayerControls;
+    }
+
+    @Override
+    protected View getDefaultControlFocusView() {
+        return btnPlayPause;
+    }
+
+    @Override
+    protected int[] getControlButtonIds() {
+        return new int[]{
+                R.id.btnPrePage,
+                R.id.btnNextPage,
+                R.id.btnPlayPause,
+                R.id.btnFavorite,
+                R.id.btnChangePlayMode
+        };
+    }
+
+    @Override
+    protected void focusPlaybackArea() {
+        if (txtAudioCover != null) {
+            txtAudioCover.setFocusableInTouchMode(true);
+            txtAudioCover.requestFocus();
+        } else {
+            super.focusPlaybackArea();
+        }
+    }
+
+    @Override
+    protected boolean showControls() {
+        setControlsVisible(true);
+        return true;
+    }
+
+    @Override
     protected void pausePlay() {
         super.pausePlay();
         showPageInfo();
     }
 
+    @Override
+    protected void release() {
+        cancelPendingAutoNext();
+        super.release();
+    }
+
     private void showPageInfo() {
         if (audioFiles == null || audioFiles.size() == 0 || currentPlayResIndex < 0 || currentPlayResIndex >= audioFiles.size()) {
             return;
-        }
-        if (progressBar != null) {
-            progressBar.setProgress(0);
         }
         String audioFileName = audioFiles.get(currentPlayResIndex);
         boolean favorite = TvBookStore.isFavorite(this, TvBookStore.TYPE_AUDIO, currentFolderPath + "/" + audioFileName);
@@ -282,6 +338,9 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         txtAudioStatus.setText(audioFileName + "   " + meta);
         if (btnFavorite != null) {
             btnFavorite.setText(favorite ? "已收藏" : "收藏");
+        }
+        if (btnPlayPause != null) {
+            btnPlayPause.setText(isAppPaused ? "继续" : "暂停");
         }
         if (btnChangePlayMode != null) {
             btnChangePlayMode.setText(isAutoPlayMode ? "自动" : "手动");
@@ -301,7 +360,15 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         if (viewPlayerControls == null) return;
         viewPlayerControls.setVisibility(visible ? View.VISIBLE : View.GONE);
         if (visible && btnPlayPause != null) {
+            updateProgressText();
             btnPlayPause.requestFocus();
+        }
+    }
+
+    private void cancelPendingAutoNext() {
+        if (pendingAutoNextRunnable != null) {
+            handlerUpdateUI.removeCallbacks(pendingAutoNextRunnable);
+            pendingAutoNextRunnable = null;
         }
     }
 

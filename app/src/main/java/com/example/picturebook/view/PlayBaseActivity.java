@@ -10,6 +10,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewParent;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.ProgressBar;
@@ -24,8 +26,13 @@ public abstract class PlayBaseActivity extends Activity {
     public static final int MSG_FILES_FOUND_OK = 0;
     public static final int MSG_PLAY_NEXT = 1;
     public static final int MSG_UPDATE_PROGRESS = 2;
+    private static final long BACK_CONFIRM_INTERVAL_MS = 2000L;
+    private static final int MIN_RESUME_REMAINING_MS = 5000;
+    private static final int COMPLETION_TOLERANCE_MS = 1500;
     private static final String AUTO_PLAY_KEY = "isAutoPlay";
     protected SharedPreferences mSP;
+    private long lastBackPressedAt = 0;
+    private int earlyCompletionResumeCount = 0;
 
     // App当前状态
     protected  boolean isAppPaused = false;
@@ -87,6 +94,34 @@ public abstract class PlayBaseActivity extends Activity {
         return false;
     }
 
+    protected boolean showControls() {
+        return toggleControlsVisibility();
+    }
+
+    protected boolean hideControls() {
+        return false;
+    }
+
+    protected View getControlsView() {
+        return null;
+    }
+
+    protected View getDefaultControlFocusView() {
+        return null;
+    }
+
+    protected int[] getControlButtonIds() {
+        return new int[0];
+    }
+
+    protected void focusPlaybackArea() {
+        View decorView = getWindow().getDecorView();
+        if (decorView != null) {
+            decorView.setFocusableInTouchMode(true);
+            decorView.requestFocus();
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -141,18 +176,24 @@ public abstract class PlayBaseActivity extends Activity {
         if (action != KeyEvent.ACTION_DOWN)
             return false;
 
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            return handleBackKey();
+        }
+        if (keyCode == KeyEvent.KEYCODE_HOME) {
+            this.release();
+            this.finish();
+            return true;
+        }
+        if (areControlsVisible()) {
+            return handleControlKey(keyCode);
+        }
+
         switch (keyCode) {
-            case KeyEvent.KEYCODE_BACK:
-            case KeyEvent.KEYCODE_HOME: {
-                Toast.makeText(PlayBaseActivity.this, "返回", Toast.LENGTH_SHORT).show();
-                this.release();
-                this.finish();
-                return true;
-            }
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_DPAD_CENTER:
                 //确定键enter
                 pausePlay();
+                showControls();
                 return true;
             case KeyEvent.KEYCODE_MENU:
                 return toggleControlsVisibility();
@@ -182,15 +223,126 @@ public abstract class PlayBaseActivity extends Activity {
         return false;
     }
 
+    private boolean handleBackKey() {
+        if (areControlsVisible()) {
+            hideControls();
+            focusPlaybackArea();
+            return true;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastBackPressedAt < BACK_CONFIRM_INTERVAL_MS) {
+            this.release();
+            this.finish();
+        } else {
+            lastBackPressedAt = now;
+            Toast.makeText(PlayBaseActivity.this, "再按一次返回退出播放", Toast.LENGTH_SHORT).show();
+        }
+        return true;
+    }
+
+    private boolean handleControlKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_MENU:
+                hideControls();
+                focusPlaybackArea();
+                return true;
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+                View focus = getCurrentFocus();
+                if (!isFocusInsideControls(focus)) {
+                    focusDefaultControl();
+                    focus = getCurrentFocus();
+                }
+                if (focus != null && isFocusInsideControls(focus)) {
+                    focus.performClick();
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                return moveControlFocus(-1);
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                return moveControlFocus(1);
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                focusDefaultControl();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private boolean areControlsVisible() {
+        View controls = getControlsView();
+        return controls != null && controls.getVisibility() == View.VISIBLE;
+    }
+
+    protected boolean focusDefaultControl() {
+        View defaultView = getDefaultControlFocusView();
+        if (defaultView != null) {
+            defaultView.requestFocus();
+            return true;
+        }
+        return moveControlFocus(1);
+    }
+
+    private boolean moveControlFocus(int direction) {
+        int[] ids = getControlButtonIds();
+        if (ids == null || ids.length == 0) {
+            return false;
+        }
+        int currentIndex = -1;
+        View current = getCurrentFocus();
+        if (current != null) {
+            int focusedId = current.getId();
+            for (int i = 0; i < ids.length; i++) {
+                if (ids[i] == focusedId) {
+                    currentIndex = i;
+                    break;
+                }
+            }
+        }
+        int nextIndex = currentIndex < 0
+                ? 0
+                : (currentIndex + direction + ids.length) % ids.length;
+        View next = findViewById(ids[nextIndex]);
+        if (next != null) {
+            next.requestFocus();
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isFocusInsideControls(View focus) {
+        View controls = getControlsView();
+        if (focus == null || controls == null) return false;
+        if (focus == controls) return true;
+        ViewParent parent = focus.getParent();
+        while (parent instanceof View) {
+            if (parent == controls) {
+                return true;
+            }
+            parent = parent.getParent();
+        }
+        return false;
+    }
+
     protected void pausePlay() {
-        isAppPaused = !isAppPaused;
         if (mediaPlayer != null) {
             if (mediaPlayer.isPlaying()) {
+                try {
+                    currentPlayMediaPos = mediaPlayer.getCurrentPosition();
+                } catch (Exception e) {
+                    currentPlayMediaPos = 0;
+                }
                 mediaPlayer.pause();
-                isAutoPlayMode = false;
-            } else {
+                isAppPaused = true;
+            } else if (isAppPaused) {
                 mediaPlayer.start();
+                isAppPaused = false;
+            } else {
+                isAppPaused = true;
             }
+        } else {
+            isAppPaused = !isAppPaused;
         }
     }
 
@@ -214,6 +366,7 @@ public abstract class PlayBaseActivity extends Activity {
 
 
     protected void playAudio(String audioFilePath) {
+        earlyCompletionResumeCount = 0;
         if (!new File(audioFilePath).exists()) {
             isAudioExistThisPage = false;
             if (mediaPlayer != null) {
@@ -247,12 +400,16 @@ public abstract class PlayBaseActivity extends Activity {
                 mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
                     @Override
                     public void onPrepared(MediaPlayer mp) {
-                        if (currentPlayMediaPos > 0 && currentPlayMediaPos < mp.getDuration()) {
+                        int duration = mp.getDuration();
+                        if (currentPlayMediaPos > 0 && currentPlayMediaPos < duration - MIN_RESUME_REMAINING_MS) {
                             mp.seekTo(currentPlayMediaPos);
+                        } else if (currentPlayMediaPos > 0) {
+                            currentPlayMediaPos = 0;
                         }
                         mp.start();
+                        isAppPaused = false;
                         if (progressBar != null) {
-                            progressBar.setMax(mp.getDuration());
+                            progressBar.setMax(duration);
                         }
                     }
                 });
@@ -260,6 +417,10 @@ public abstract class PlayBaseActivity extends Activity {
                 mediaPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
                     @Override
                     public void onCompletion(MediaPlayer mediaPlayer) {
+                        if (!shouldAcceptCompletion(mediaPlayer)) {
+                            resumeAfterEarlyCompletion(mediaPlayer);
+                            return;
+                        }
                         currentPlayMediaPos = 0;
                         onAudioPlayCompletion();
                     }
@@ -285,6 +446,31 @@ public abstract class PlayBaseActivity extends Activity {
             }
         } catch (Exception e) {
             Toast.makeText(PlayBaseActivity.this, e.toString(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean shouldAcceptCompletion(MediaPlayer player) {
+        try {
+            int duration = player.getDuration();
+            int position = player.getCurrentPosition();
+            if (duration <= 0 || duration <= 4000) return true;
+            return position >= duration - COMPLETION_TOLERANCE_MS;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+
+    private void resumeAfterEarlyCompletion(MediaPlayer player) {
+        if (earlyCompletionResumeCount > 0 || isAppPaused) {
+            return;
+        }
+        earlyCompletionResumeCount++;
+        try {
+            int position = Math.max(0, player.getCurrentPosition());
+            player.seekTo(position);
+            player.start();
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 

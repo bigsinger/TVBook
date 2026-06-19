@@ -32,8 +32,10 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     private ProgressBar pageProgressBar;
     private TextView txtProgressCurrent;
     private TextView txtProgressTotal;
+    private Button btnPlayPause;
     private Button btnFavorite;
     private Button btnChangePlayMode;
+    private Runnable pendingAutoPageRunnable;
 
     private String currentBookType = null;
     private String currentBookName = null;
@@ -59,8 +61,10 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         pageProgressBar = findViewById(R.id.pageProgressBar);
         txtProgressCurrent = findViewById(R.id.txtProgressCurrent);
         txtProgressTotal = findViewById(R.id.txtProgressTotal);
+        btnPlayPause = findViewById(R.id.btnPlayPause);
         btnFavorite = findViewById(R.id.btnFavorite);
         btnChangePlayMode = findViewById(R.id.btnChangePlayMode);
+        txtViewInfo.setVisibility(View.GONE);
         setControlsVisible(false);
 
         Intent intent = getIntent();
@@ -143,6 +147,7 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     }
 
     private void playCurrentPage(int mediaPos) {
+        cancelPendingAutoPage();
         currentPlayMediaPos = Math.max(0, mediaPos);
         File pageImageFile = new File(Settings.getRootPath(this), currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".jpg");
         File pageAudioFile = new File(Settings.getRootPath(this), currentBookType + "/" + currentBookName + "/" + currentPlayPageIndex + ".mp3");
@@ -200,14 +205,20 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     @Override
     protected void onAudioPlayCompletion() {
         if (!isAppPaused && isAutoPlayMode) {
-            new Handler().postDelayed(new Runnable() {
+            cancelPendingAutoPage();
+            final int completedBookIndex = currentPlayResIndex;
+            final int completedPageIndex = currentPlayPageIndex;
+            pendingAutoPageRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    if (!isAppPaused) {
+                    if (!isAppPaused && isAutoPlayMode
+                            && currentPlayResIndex == completedBookIndex
+                            && currentPlayPageIndex == completedPageIndex) {
                         turnNextPage(false);
                     }
                 }
-            }, Settings.getDelaySecondsPerAudio() * 1000L);
+            };
+            handlerUpdateUI.postDelayed(pendingAutoPageRunnable, Settings.getDelaySecondsPerAudio() * 1000L);
         }
     }
 
@@ -273,9 +284,60 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     }
 
     @Override
+    protected boolean hideControls() {
+        setControlsVisible(false);
+        return true;
+    }
+
+    @Override
+    protected View getControlsView() {
+        return viewPlayerControls;
+    }
+
+    @Override
+    protected View getDefaultControlFocusView() {
+        return btnPlayPause;
+    }
+
+    @Override
+    protected int[] getControlButtonIds() {
+        return new int[]{
+                R.id.btnPrePage,
+                R.id.btnNextPage,
+                R.id.btnPrevBook,
+                R.id.btnNextBook,
+                R.id.btnPlayPause,
+                R.id.btnFavorite,
+                R.id.btnChangePlayMode
+        };
+    }
+
+    @Override
+    protected void focusPlaybackArea() {
+        if (imageView != null) {
+            imageView.setFocusableInTouchMode(true);
+            imageView.requestFocus();
+        } else {
+            super.focusPlaybackArea();
+        }
+    }
+
+    @Override
+    protected boolean showControls() {
+        setControlsVisible(true);
+        return true;
+    }
+
+    @Override
     protected void pausePlay() {
         super.pausePlay();
         showPageInfo();
+    }
+
+    @Override
+    protected void release() {
+        cancelPendingAutoPage();
+        super.release();
     }
 
     private String playbackCategoryKey() {
@@ -305,6 +367,9 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
         if (btnFavorite != null) {
             btnFavorite.setText(favorite ? "已收藏" : "收藏");
         }
+        if (btnPlayPause != null) {
+            btnPlayPause.setText(isAppPaused ? "继续" : "暂停");
+        }
         if (btnChangePlayMode != null) {
             btnChangePlayMode.setText(isAutoPlayMode ? "自动" : "手动");
         }
@@ -313,8 +378,18 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     private void setControlsVisible(boolean visible) {
         if (viewPlayerControls == null) return;
         viewPlayerControls.setVisibility(visible ? View.VISIBLE : View.GONE);
-        if (visible) {
-            viewPlayerControls.requestFocus();
+        if (txtViewInfo != null) {
+            txtViewInfo.setVisibility(View.GONE);
+        }
+        if (visible && btnPlayPause != null) {
+            btnPlayPause.requestFocus();
+        }
+    }
+
+    private void cancelPendingAutoPage() {
+        if (pendingAutoPageRunnable != null) {
+            handlerUpdateUI.removeCallbacks(pendingAutoPageRunnable);
+            pendingAutoPageRunnable = null;
         }
     }
 

@@ -61,7 +61,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     private TextView txtFavCount;
     private TextView txtDelaySecondsPerAudio;
     private Button btnPlayMode;
+    private Button btnSyncCatalog;
     private long exitTime = 0;
+    private boolean isCatalogSyncing = false;
 
     private final List<MenuEntry> menuEntries = new ArrayList<MenuEntry>();
     private MenuEntry currentMenuEntry;
@@ -123,6 +125,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         mSP = getSharedPreferences("cache", Context.MODE_PRIVATE);
 
         btnPlayMode = findViewById(R.id.btnPlayMode);
+        btnSyncCatalog = findViewById(R.id.btnSyncCatalog);
         txtDelaySecondsPerAudio = findViewById(R.id.txtDelaySecondsPerAudio);
         viewMenu = findViewById(R.id.viewMenu);
         viewSubMenu = findViewById(R.id.viewSubMenu);
@@ -276,51 +279,38 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             return entries;
         }
 
-        List<String> names = scanContentNames(entry.type, entry.path);
-        for (String name : names) {
-            if (TextUtils.isEmpty(name)) continue;
-            String subtitle;
-            String targetName = name;
-            if (TvBookStore.TYPE_AUDIO_IMAGE.equals(entry.type)) {
-                subtitle = "绘本 · " + countBookPages(entry.path + "/" + name) + " 页";
-            } else {
-                subtitle = "音频 · " + entry.path;
-            }
-            entries.add(new ContentEntry(name, subtitle, entry.type, entry.path, targetName, false, null));
-        }
+        TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, entry.type, entry.path);
+        String subtitle = snapshot.exists
+                ? buildFolderSubtitle(entry.type, entry.path)
+                : "目录未同步，可按 Menu 或右侧同步按钮";
+        entries.add(new ContentEntry("播放全部", subtitle, entry.type, entry.path, null, false, null));
         return entries;
     }
 
     private String buildFolderSubtitle(String type, String path) {
-        List<String> names = scanContentNames(type, path);
+        TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, type, path);
         if (TvBookStore.TYPE_AUDIO_IMAGE.equals(type)) {
-            return "绘本分类 · " + names.size() + " 本";
+            return snapshot.exists ? "绘本分类 · " + snapshot.count + " 本" : "绘本分类";
         }
         if (TvBookStore.TYPE_AUDIO.equals(type)) {
-            return "音频合集 · " + names.size() + " 首";
+            return snapshot.exists ? "音频合集 · " + snapshot.count + " 首" : "音频合集";
         }
         return "内容 · " + path;
     }
 
-    private List<String> scanContentNames(String type, String path) {
-        File rootDir = Settings.getRootDir(this);
-        if (rootDir == null) return new ArrayList<String>();
-        File dir = new File(rootDir, TvBookStore.normalizePath(path));
-        if (!dir.exists()) return new ArrayList<String>();
-        return utils.getAllFilesOfDir(dir, TvBookStore.TYPE_AUDIO_IMAGE.equals(type));
-    }
-
-    private int countBookPages(String relativeBookPath) {
+    private int countCatalogItems(String type, String path) {
         File rootDir = Settings.getRootDir(this);
         if (rootDir == null) return 0;
-        File bookDir = new File(rootDir, TvBookStore.normalizePath(relativeBookPath));
-        File[] files = bookDir.listFiles();
+        File dir = new File(rootDir, TvBookStore.normalizePath(path));
+        File[] files = dir.listFiles();
         if (files == null) return 0;
         int count = 0;
         for (File file : files) {
-            if (!file.isFile()) continue;
-            String name = file.getName().toLowerCase();
-            if (name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp")) {
+            if (TvBookStore.TYPE_AUDIO_IMAGE.equals(type)) {
+                if (file.isDirectory()) count++;
+            } else if (TvBookStore.TYPE_AUDIO.equals(type)) {
+                if (file.isFile()) count++;
+            } else if (file.isFile() || file.isDirectory()) {
                 count++;
             }
         }
@@ -371,7 +361,8 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             startFavorite(entry.favoriteItem);
             return;
         }
-        if (entry.targetName == null && scanContentNames(entry.type, entry.path).isEmpty()) {
+        TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, entry.type, entry.path);
+        if (entry.targetName == null && snapshot.exists && snapshot.count == 0) {
             Toast.makeText(this, "暂无可播放内容", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -392,6 +383,62 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             refreshSettingsText();
             saveSetting(DELAY_AUDIO_KEY, Integer.toString(value));
         }
+    }
+
+    public void onSyncCatalog(View v) {
+        if (isCatalogSyncing) {
+            Toast.makeText(this, "目录正在同步", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (Settings.getRootDir(this) == null) {
+            Toast.makeText(this, "请插入包含 tvbooks 的U盘", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        isCatalogSyncing = true;
+        if (btnSyncCatalog != null) {
+            btnSyncCatalog.setEnabled(false);
+            btnSyncCatalog.setText("同步中");
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final int syncedCount = syncCatalogInBackground();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        isCatalogSyncing = false;
+                        if (btnSyncCatalog != null) {
+                            btnSyncCatalog.setEnabled(true);
+                            btnSyncCatalog.setText("同步");
+                        }
+                        renderContent(currentMenuEntry);
+                        Toast.makeText(MainActivity.this, "目录同步完成: " + syncedCount + " 个目录", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private int syncCatalogInBackground() {
+        int count = 0;
+        for (MenuEntry entry : menuEntries) {
+            if (entry == null || entry.favoriteRoot || entry.h5) continue;
+            if (!entry.subMenus.isEmpty()) {
+                for (String subMenu : entry.subMenus) {
+                    count += syncOneCatalogFolder(entry.type, entry.path + "/" + subMenu);
+                }
+            } else {
+                count += syncOneCatalogFolder(entry.type, entry.path);
+            }
+        }
+        return count;
+    }
+
+    private int syncOneCatalogFolder(String type, String path) {
+        TvBookStore.saveCatalogCount(this, type, path, countCatalogItems(type, path));
+        return 1;
     }
 
     @Override
@@ -477,6 +524,34 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             }
             startActivity(intent);
         }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            int keyCode = event.getKeyCode();
+            View focus = getCurrentFocus();
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (focus == null || focus.getTag() instanceof MenuEntry) {
+                    return focusFirstContent();
+                }
+                if (focus.getTag() instanceof ContentEntry && btnSyncCatalog != null) {
+                    btnSyncCatalog.requestFocus();
+                    return true;
+                }
+            } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (focus != null && focus.getTag() instanceof ContentEntry) {
+                    return focusSelectedMenu();
+                }
+                if (focus == btnSyncCatalog) {
+                    return focusFirstContent();
+                }
+            } else if (keyCode == KeyEvent.KEYCODE_MENU) {
+                onSyncCatalog(btnSyncCatalog);
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override
@@ -583,7 +658,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     }
 
     private void refreshSettingsText() {
-        btnPlayMode.setText(isAutoPlayMode ? "自动播放" : "手动播放");
+        btnPlayMode.setText(isAutoPlayMode ? "自动" : "手动");
         txtDelaySecondsPerAudio.setText(String.valueOf(Settings.delaySecondsPerAudio));
     }
 
@@ -688,6 +763,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         textView.setPadding(dp(20), dp(10), dp(20), dp(10));
         textView.setFocusable(true);
         textView.setClickable(true);
+        textView.setNextFocusRightId(R.id.btnSyncCatalog);
         textView.setBackgroundResource(R.drawable.tv_content_item);
         textView.setTag(entry);
         textView.setOnClickListener(this);
@@ -705,6 +781,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
                 R.id.btnPlayMode,
                 R.id.btnDec,
                 R.id.btnInc,
+                R.id.btnSyncCatalog,
                 R.id.btn_open_document_tree,
                 R.id.btn_exit
         };
