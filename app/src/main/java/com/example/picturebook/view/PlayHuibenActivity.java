@@ -5,6 +5,7 @@ import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.view.KeyEvent;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.Button;
@@ -23,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClickListener {
+    private static final long CONTROLS_AUTO_HIDE_MS = 10000L;
     public static final String EXTRA_BOOK_NAME = "book_name";
     public static final String EXTRA_PLAYLIST_PATHS = "playlist_paths";
     public static final String EXTRA_PLAYLIST_KEY = "playlist_key";
@@ -41,6 +43,13 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     private int autoPageToken = 0;
     private long currentPageStartedAt = 0;
     private boolean currentPageAudioFinished = true;
+    private final Runnable hideControlsAfterTimeout = new Runnable() {
+        @Override
+        public void run() {
+            setControlsVisible(false);
+            focusPlaybackArea();
+        }
+    };
 
     private String currentBookType = null;
     private String currentBookName = null;
@@ -412,12 +421,37 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     private void setControlsVisible(boolean visible) {
         if (viewPlayerControls == null) return;
         viewPlayerControls.setVisibility(visible ? View.VISIBLE : View.GONE);
+        resetControlsAutoHide(visible);
         if (txtViewInfo != null) {
             txtViewInfo.setVisibility(View.GONE);
         }
         if (visible && btnPlayPause != null) {
             btnPlayPause.requestFocus();
         }
+    }
+
+    private void resetControlsAutoHide(boolean controlsVisible) {
+        handlerUpdateUI.removeCallbacks(hideControlsAfterTimeout);
+        if (controlsVisible) {
+            handlerUpdateUI.postDelayed(hideControlsAfterTimeout, CONTROLS_AUTO_HIDE_MS);
+        }
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        if (viewPlayerControls != null && viewPlayerControls.getVisibility() == View.VISIBLE) {
+            resetControlsAutoHide(true);
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN && viewPlayerControls != null
+                && viewPlayerControls.getVisibility() == View.VISIBLE) {
+            resetControlsAutoHide(true);
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private void cancelPendingAutoPage() {

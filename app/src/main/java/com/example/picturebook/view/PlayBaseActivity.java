@@ -125,6 +125,10 @@ public abstract class PlayBaseActivity extends Activity {
         return false;
     }
 
+    protected boolean useAudioCompletionWatchdog() {
+        return true;
+    }
+
     protected void focusPlaybackArea() {
         View decorView = getWindow().getDecorView();
         if (decorView != null) {
@@ -470,6 +474,10 @@ public abstract class PlayBaseActivity extends Activity {
         if (!isCurrentAudioRequest(requestSerial, player) || activeAudioCompletionDelivered) {
             return;
         }
+        if (!useAudioCompletionWatchdog()) {
+            deliverAudioCompletion(requestSerial);
+            return;
+        }
         if (!hasReachedExpectedAudioEnd()) {
             scheduleAudioCompletionWatchdog(requestSerial);
             return;
@@ -497,6 +505,9 @@ public abstract class PlayBaseActivity extends Activity {
 
     private void scheduleAudioCompletionWatchdog(final int requestSerial) {
         cancelAudioCompletionWatchdog();
+        if (!useAudioCompletionWatchdog()) {
+            return;
+        }
         if (requestSerial != activeAudioRequestSerial || activeAudioCompletionDelivered || isAppPaused || activeAudioDurationMs <= 0) {
             return;
         }

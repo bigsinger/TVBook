@@ -1,4 +1,3 @@
-adb push  .\menu.txt /data/local/tmp/tvbooks/menu.txt
 
 adb push  .\test\huiben\池塘\1.jpg /data/local/tmp/tvbooks/huiben/chitang/1.jpg
 adb push  .\test\huiben\池塘\2.jpg /data/local/tmp/tvbooks/huiben/chitang/2.jpg

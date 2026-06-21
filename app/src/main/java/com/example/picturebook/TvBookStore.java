@@ -9,11 +9,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Properties;
 
 public class TvBookStore {
     public static final String TYPE_AUDIO_IMAGE = "audio_image";
     public static final String TYPE_AUDIO = "audio";
+    public static final String TYPE_DIRECTORY = "directory_tree";
 
     private static final String SETTINGS_FILE = "settings.properties";
     private static final String PLAYBACK_FILE = "playback.properties";
@@ -167,6 +170,49 @@ public class TvBookStore {
         props.setProperty(key + ".names", joinNames(safeNames));
         props.setProperty(key + ".updatedAt", Long.toString(System.currentTimeMillis()));
         return storeProperties(context, CATALOG_FILE, props, "TVBook catalog");
+    }
+
+    public static synchronized boolean saveCatalogTree(Context context, String type,
+                                                       Map<String, List<String>> tree) {
+        Properties props = loadProperties(context, CATALOG_FILE);
+        String pathListKey = "tree.paths." + safe(type);
+        List<String> oldPaths = splitNames(props.getProperty(pathListKey));
+        for (String oldPath : oldPaths) {
+            if (".".equals(oldPath)) oldPath = "";
+            String oldKey = catalogKey(type, oldPath);
+            props.remove(oldKey + ".count");
+            props.remove(oldKey + ".names");
+            props.remove(oldKey + ".updatedAt");
+        }
+
+        List<String> paths = new ArrayList<String>();
+        long updatedAt = System.currentTimeMillis();
+        if (tree != null) {
+            for (Map.Entry<String, List<String>> entry : tree.entrySet()) {
+                String path = normalizePath(entry.getKey());
+                List<String> names = entry.getValue() == null
+                        ? new ArrayList<String>() : entry.getValue();
+                String key = catalogKey(type, path);
+                props.setProperty(key + ".count", Integer.toString(names.size()));
+                props.setProperty(key + ".names", joinNames(names));
+                props.setProperty(key + ".updatedAt", Long.toString(updatedAt));
+                paths.add(path.length() == 0 ? "." : path);
+            }
+        }
+        props.setProperty(pathListKey, joinNames(paths));
+        return storeProperties(context, CATALOG_FILE, props, "TVBook directory tree");
+    }
+
+    public static synchronized Map<String, List<String>> readCatalogTree(Context context, String type) {
+        Map<String, List<String>> tree = new LinkedHashMap<String, List<String>>();
+        Properties props = loadProperties(context, CATALOG_FILE);
+        List<String> paths = splitNames(props.getProperty("tree.paths." + safe(type)));
+        for (String storedPath : paths) {
+            String path = ".".equals(storedPath) ? "" : normalizePath(storedPath);
+            String key = catalogKey(type, path);
+            tree.put(path, splitNames(props.getProperty(key + ".names")));
+        }
+        return tree;
     }
 
     public static boolean saveCatalogCount(Context context, String type, String relativePath, int count) {

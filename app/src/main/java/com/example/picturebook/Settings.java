@@ -11,8 +11,6 @@ public class Settings {
     // 放在U盘根目录的目录名
     public static final String RootName = "tvbooks";
     public static final String ConfigDirName = "config";
-    // 根目录下的菜单配置文件名
-    public static String MenuFileName = "menu.txt";
     // 每个分类目录下放置一个目录索引，内容为：每行是一本书的名称，utf-8格式编码，以支持中文
     public static String BookIndexFileName = "index.txt";
     // 如果自动播放图片，默认多少秒切换
