@@ -32,7 +32,10 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class MainActivity extends Activity implements View.OnClickListener, View.OnFocusChangeListener {
     private static final int REQUEST_EXTERNAL_STORAGE = 1;
@@ -69,6 +72,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     private MenuEntry currentMenuEntry;
     private boolean showingFavoriteList = false;
     private boolean suppressMenuFocusRender = false;
+    private boolean refreshingMenuStructure = false;
+    private String menuDirectorySignature = "";
+    private long lastMenuStructureCheckAt = 0;
 
     private static class MenuEntry {
         final String title;
@@ -76,7 +82,6 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         final String path;
         final boolean favoriteRoot;
         final boolean h5;
-        final List<String> subMenus = new ArrayList<String>();
 
         MenuEntry(String title, String type, String path, boolean favoriteRoot, boolean h5) {
             this.title = title;
@@ -160,6 +165,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     }
 
     private void initMenu() {
+        String preferredMenuKey = menuKey(currentMenuEntry);
         menuEntries.clear();
         viewMenu.removeAllViews();
         viewSubMenu.removeAllViews();
@@ -170,54 +176,70 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         if (rootPath == null) {
             Toast.makeText(MainActivity.this, "请插入包含 tvbooks 的U盘", Toast.LENGTH_LONG).show();
             menuEntries.add(new MenuEntry("H5 在线绘本", "h5", "", false, true));
-            renderMenu();
+            renderMenu(preferredMenuKey);
+            menuDirectorySignature = "";
             return;
         }
 
-        try {
-            File menuFile = new File(rootPath, Settings.MenuFileName);
-            if (!menuFile.exists()) {
-                Toast.makeText(MainActivity.this, "请配置菜单文件:" + menuFile.getAbsolutePath(), Toast.LENGTH_LONG).show();
-                menuEntries.add(new MenuEntry("H5 在线绘本", "h5", "", false, true));
-                renderMenu();
-                return;
-            }
+        File rootDir = new File(rootPath);
+        List<MenuEntry> configuredEntries = readConfiguredMenuEntries(rootDir);
+        List<String> actualDirectories = listDirectories(rootDir);
+        Set<String> addedPaths = new HashSet<String>();
 
+        for (MenuEntry configured : configuredEntries) {
+            if (actualDirectories.contains(configured.path) && !addedPaths.contains(configured.path)) {
+                menuEntries.add(configured);
+                addedPaths.add(configured.path);
+            }
+        }
+
+        for (String directoryName : actualDirectories) {
+            if (addedPaths.contains(directoryName)) continue;
+            File directory = new File(rootDir, directoryName);
+            menuEntries.add(new MenuEntry(directoryName, inferMenuType(directory), directoryName, false, false));
+        }
+
+        menuEntries.add(new MenuEntry("H5 在线绘本", "h5", "", false, true));
+        renderMenu(preferredMenuKey);
+        menuDirectorySignature = buildMenuDirectorySignature(rootDir);
+    }
+
+    private List<MenuEntry> readConfiguredMenuEntries(File rootDir) {
+        List<MenuEntry> entries = new ArrayList<MenuEntry>();
+        File menuFile = new File(rootDir, Settings.MenuFileName);
+        if (!menuFile.isFile()) {
+            return entries;
+        }
+        try {
             String menuJsonStr = utils.readToString(menuFile.getAbsolutePath());
             JSONObject jsonObject = new JSONObject(menuJsonStr);
             JSONArray menus = jsonObject.getJSONArray("menu");
             for (int i = 0; i < menus.length(); i++) {
                 JSONObject menu = menus.getJSONObject(i);
-                String name = menu.getString("name");
+                String name = TvBookStore.normalizePath(menu.getString("name"));
                 String type = menu.getString("type");
-                MenuEntry entry = new MenuEntry(name, type, name, false, false);
-
-                JSONArray submenus = null;
-                try {
-                    submenus = menu.getJSONArray("submenu");
-                } catch (Exception e) {
-                    submenus = null;
+                if (name.length() > 0) {
+                    entries.add(new MenuEntry(name, type, name, false, false));
                 }
-                if (submenus != null) {
-                    for (int j = 0; j < submenus.length(); j++) {
-                        JSONObject submenu = submenus.getJSONObject(j);
-                        entry.subMenus.add(submenu.getString("name"));
-                    }
-                }
-                menuEntries.add(entry);
             }
-            menuEntries.add(new MenuEntry("H5 在线绘本", "h5", "", false, true));
-            renderMenu();
         } catch (Exception e) {
-            Toast.makeText(MainActivity.this, e.getMessage(), Toast.LENGTH_LONG).show();
-            Log.e(TAG, e.toString());
-            menuEntries.add(new MenuEntry("H5 在线绘本", "h5", "", false, true));
-            renderMenu();
+            Log.e(TAG, "菜单配置解析失败，改用目录自动生成: " + e.getMessage());
+            Toast.makeText(this, "menu.txt 解析失败，已按目录生成菜单", Toast.LENGTH_SHORT).show();
         }
+        return entries;
     }
 
-    private void renderMenu() {
+    private void renderMenu(String preferredMenuKey) {
         viewMenu.removeAllViews();
+        int selectedIndex = 0;
+        if (preferredMenuKey != null && preferredMenuKey.length() > 0) {
+            for (int i = 0; i < menuEntries.size(); i++) {
+                if (preferredMenuKey.equals(menuKey(menuEntries.get(i)))) {
+                    selectedIndex = i;
+                    break;
+                }
+            }
+        }
         for (int i = 0; i < menuEntries.size(); i++) {
             MenuEntry entry = menuEntries.get(i);
             Button button = createMenuButton(entry.title);
@@ -225,7 +247,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             button.setOnClickListener(this);
             button.setOnFocusChangeListener(this);
             viewMenu.addView(button);
-            if (i == 0) {
+            if (i == selectedIndex) {
                 currentMenuEntry = entry;
                 button.setSelected(true);
                 button.setTextColor(Color.rgb(240, 192, 64));
@@ -239,6 +261,142 @@ public class MainActivity extends Activity implements View.OnClickListener, View
                 });
             }
         }
+    }
+
+    private String menuKey(MenuEntry entry) {
+        if (entry == null) return "";
+        if (entry.favoriteRoot) return "favorite_root";
+        if (entry.h5) return "h5";
+        return entry.type + ":" + TvBookStore.normalizePath(entry.path);
+    }
+
+    private List<String> listDirectories(File parent) {
+        List<String> names = new ArrayList<String>();
+        if (parent == null) return names;
+        File[] files = parent.listFiles();
+        if (files == null) return names;
+        for (File file : files) {
+            if (!file.isDirectory()) continue;
+            String name = file.getName();
+            if (name.length() == 0 || name.startsWith(".") || "config".equalsIgnoreCase(name)) continue;
+            names.add(name);
+        }
+        Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
+        return names;
+    }
+
+    private String inferMenuType(File directory) {
+        if (containsImageFile(directory)) {
+            return TvBookStore.TYPE_AUDIO_IMAGE;
+        }
+        List<String> childNames = listDirectories(directory);
+        for (String childName : childNames) {
+            File child = new File(directory, childName);
+            if (containsImageFile(child) || containsBookDirectory(child)) {
+                return TvBookStore.TYPE_AUDIO_IMAGE;
+            }
+        }
+        return TvBookStore.TYPE_AUDIO;
+    }
+
+    private List<String> discoverSubMenus(MenuEntry entry) {
+        List<String> result = new ArrayList<String>();
+        if (entry == null || entry.favoriteRoot || entry.h5) return result;
+        File rootDir = Settings.getRootDir(this);
+        if (rootDir == null) return result;
+        File categoryDir = new File(rootDir, TvBookStore.normalizePath(entry.path));
+        List<String> childNames = listDirectories(categoryDir);
+        if (TvBookStore.TYPE_AUDIO.equals(entry.type)) {
+            return childNames;
+        }
+        if (TvBookStore.TYPE_AUDIO_IMAGE.equals(entry.type)) {
+            for (String childName : childNames) {
+                File child = new File(categoryDir, childName);
+                if (!containsPageMediaFile(child)) {
+                    result.add(childName);
+                }
+            }
+        }
+        return result;
+    }
+
+    private boolean hasDirectPlayableContent(String type, String path) {
+        File rootDir = Settings.getRootDir(this);
+        if (rootDir == null) return false;
+        File directory = new File(rootDir, TvBookStore.normalizePath(path));
+        if (TvBookStore.TYPE_AUDIO.equals(type)) {
+            return containsAudioFile(directory);
+        }
+        if (TvBookStore.TYPE_AUDIO_IMAGE.equals(type)) {
+            List<String> childNames = listDirectories(directory);
+            for (String childName : childNames) {
+                if (containsPageMediaFile(new File(directory, childName))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean containsBookDirectory(File directory) {
+        List<String> childNames = listDirectories(directory);
+        for (String childName : childNames) {
+            if (containsImageFile(new File(directory, childName))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsPageMediaFile(File directory) {
+        return containsImageFile(directory) || containsAudioFile(directory);
+    }
+
+    private boolean containsImageFile(File directory) {
+        return containsFileWithExtension(directory, new String[]{".jpg", ".jpeg", ".png", ".webp"});
+    }
+
+    private boolean containsAudioFile(File directory) {
+        return containsFileWithExtension(directory, new String[]{".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"});
+    }
+
+    private boolean containsFileWithExtension(File directory, String[] extensions) {
+        if (directory == null) return false;
+        File[] files = directory.listFiles();
+        if (files == null) return false;
+        for (File file : files) {
+            if (!file.isFile()) continue;
+            String name = file.getName().toLowerCase();
+            for (String extension : extensions) {
+                if (name.endsWith(extension)) return true;
+            }
+        }
+        return false;
+    }
+
+    private String buildMenuDirectorySignature(File rootDir) {
+        StringBuilder signature = new StringBuilder();
+        for (String name : listDirectories(rootDir)) {
+            signature.append(name).append('\n');
+        }
+        return signature.toString();
+    }
+
+    private boolean refreshMenuStructureIfChanged(boolean forceCheck) {
+        if (refreshingMenuStructure) return false;
+        long now = System.currentTimeMillis();
+        if (!forceCheck && now - lastMenuStructureCheckAt < 1000) return false;
+        lastMenuStructureCheckAt = now;
+        File rootDir = Settings.getRootDir(this);
+        String signature = rootDir == null ? "" : buildMenuDirectorySignature(rootDir);
+        if (signature.equals(menuDirectorySignature)) return false;
+        refreshingMenuStructure = true;
+        try {
+            initMenu();
+        } finally {
+            refreshingMenuStructure = false;
+        }
+        return true;
     }
 
     private void renderContent(MenuEntry entry) {
@@ -285,22 +443,23 @@ public class MainActivity extends Activity implements View.OnClickListener, View
 
         addFavoriteGroup(entries, entry.type, entry.path);
 
-        if (!entry.subMenus.isEmpty()) {
-            for (String subMenu : entry.subMenus) {
-                String path = entry.path + "/" + subMenu;
-                String subtitle = buildFolderSubtitle(entry.type, path);
-                entries.add(new ContentEntry(subMenu, subtitle, entry.type, path, null, false, null,
-                        false, null, null));
-            }
-            return entries;
+        List<String> subMenus = discoverSubMenus(entry);
+        boolean showRootPlayAll = subMenus.isEmpty() || hasDirectPlayableContent(entry.type, entry.path);
+        if (showRootPlayAll) {
+            TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, entry.type, entry.path);
+            String subtitle = snapshot.exists
+                    ? buildFolderSubtitle(entry.type, entry.path)
+                    : "目录数量未同步";
+            entries.add(new ContentEntry("播放全部", subtitle, entry.type, entry.path, null, false, null,
+                    false, null, null));
         }
 
-        TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, entry.type, entry.path);
-        String subtitle = snapshot.exists
-                ? buildFolderSubtitle(entry.type, entry.path)
-                : "目录未同步，可按 Menu 或右侧同步按钮";
-        entries.add(new ContentEntry("播放全部", subtitle, entry.type, entry.path, null, false, null,
-                false, null, null));
+        for (String subMenu : subMenus) {
+            String path = entry.path + "/" + subMenu;
+            String subtitle = buildFolderSubtitle(entry.type, path);
+            entries.add(new ContentEntry(subMenu, subtitle, entry.type, path, null, false, null,
+                    false, null, null));
+        }
         return entries;
     }
 
@@ -390,9 +549,11 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             startFavorite(entry);
             return;
         }
-        TvBookStore.CatalogSnapshot snapshot = TvBookStore.readCatalog(this, entry.type, entry.path);
-        if (entry.targetName == null && snapshot.exists && snapshot.count == 0) {
-            Toast.makeText(this, "暂无可播放内容", Toast.LENGTH_SHORT).show();
+        File rootDir = Settings.getRootDir(this);
+        File contentDir = rootDir == null ? null : new File(rootDir, TvBookStore.normalizePath(entry.path));
+        if (entry.targetName == null && (contentDir == null || !contentDir.isDirectory())) {
+            Toast.makeText(this, "目录已不存在，正在刷新菜单", Toast.LENGTH_SHORT).show();
+            initMenu();
             return;
         }
         startContent(entry.type, entry.path, entry.targetName);
@@ -443,7 +604,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
                             btnSyncCatalog.setEnabled(true);
                             btnSyncCatalog.setText("同步");
                         }
-                        renderContent(currentMenuEntry);
+                        initMenu();
                         Toast.makeText(MainActivity.this, "目录同步完成: " + syncedCount + " 个目录", Toast.LENGTH_SHORT).show();
                     }
                 });
@@ -453,14 +614,13 @@ public class MainActivity extends Activity implements View.OnClickListener, View
 
     private int syncCatalogInBackground() {
         int count = 0;
-        for (MenuEntry entry : menuEntries) {
+        List<MenuEntry> entries = new ArrayList<MenuEntry>(menuEntries);
+        for (MenuEntry entry : entries) {
             if (entry == null || entry.favoriteRoot || entry.h5) continue;
-            if (!entry.subMenus.isEmpty()) {
-                for (String subMenu : entry.subMenus) {
-                    count += syncOneCatalogFolder(entry.type, entry.path + "/" + subMenu);
-                }
-            } else {
-                count += syncOneCatalogFolder(entry.type, entry.path);
+            count += syncOneCatalogFolder(entry.type, entry.path);
+            List<String> subMenus = discoverSubMenus(entry);
+            for (String subMenu : subMenus) {
+                count += syncOneCatalogFolder(entry.type, entry.path + "/" + subMenu);
             }
         }
         return count;
@@ -645,6 +805,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (refreshMenuStructureIfChanged(false)) {
+                return true;
+            }
             int keyCode = event.getKeyCode();
             View focus = getCurrentFocus();
             if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -668,6 +831,12 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             }
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshMenuStructureIfChanged(true);
     }
 
     @Override
