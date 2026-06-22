@@ -44,6 +44,8 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     private String rootPath;
     private String playlistKey;
     private boolean playlistMode = false;
+    private int currentTrackGeneration = 0;
+    private Runnable pendingAutoNextRunnable;
     private final Runnable hideControlsAfterTimeout = new Runnable() {
         @Override
         public void run() {
@@ -104,10 +106,8 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
                 if (msg.what == MSG_FILES_FOUND_OK) {
                     restoreStartPosition();
                     handlerUpdateUI.postDelayed(updateUI, 1000);
-                } else if (msg.what == MSG_PLAY_NEXT) {
-                    turnNextRes(false);
                 } else if (msg.what == MSG_UPDATE_PROGRESS) {
-                    if (mediaPlayer != null) {
+                    if (mediaPlayer != null && isAudioPrepared()) {
                         try {
                             currentPlayMediaPos = mediaPlayer.getCurrentPosition();
                             progressBar.setProgress(currentPlayMediaPos);
@@ -127,7 +127,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             final File scanDir = fileDir;
             new Thread(new Runnable() {
                 public void run() {
-                    audioFiles = utils.getAllFilesOfDir(scanDir, false);
+                    audioFiles = filterAudioFiles(utils.getAllFilesOfDir(scanDir, false), false);
                     handler.sendEmptyMessage(MSG_FILES_FOUND_OK);
                 }
             }).start();
@@ -141,11 +141,39 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
             String path = TvBookStore.normalizePath(item);
             if (path.length() == 0) continue;
             File file = new File(rootPath, path);
-            if (file.isFile()) {
+            if (file.isFile() && isSupportedAudioFile(path)) {
                 paths.add(path);
             }
         }
         return paths;
+    }
+
+    private List<String> filterAudioFiles(List<String> candidates, boolean relativeToRoot) {
+        List<String> result = new ArrayList<String>();
+        if (candidates == null) return result;
+        for (String item : candidates) {
+            if (item == null) continue;
+            String path = item.trim();
+            if (path.length() == 0 || !isSupportedAudioFile(path)) continue;
+            File file = relativeToRoot ? new File(rootPath, path) : new File(thisFolderPath, path);
+            if (file.isFile()) {
+                result.add(path);
+            }
+        }
+        return result;
+    }
+
+    private boolean isSupportedAudioFile(String path) {
+        String lower = path == null ? "" : path.toLowerCase();
+        return lower.endsWith(".mp3")
+                || lower.endsWith(".wav")
+                || lower.endsWith(".m4a")
+                || lower.endsWith(".aac")
+                || lower.endsWith(".ogg")
+                || lower.endsWith(".flac")
+                || lower.endsWith(".amr")
+                || lower.endsWith(".3gp")
+                || lower.endsWith(".mp4");
     }
 
     private void bindButtons() {
@@ -196,13 +224,19 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     @Override
     protected void onAudioPlayCompletion() {
         if (!isAppPaused && isAutoPlayMode) {
-            handler.sendEmptyMessage(MSG_PLAY_NEXT);
+            cancelPendingAutoNext();
+            final int completedGeneration = currentTrackGeneration;
+            pendingAutoNextRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    pendingAutoNextRunnable = null;
+                    if (completedGeneration == currentTrackGeneration && !isAppPaused && isAutoPlayMode) {
+                        turnNextRes(false);
+                    }
+                }
+            };
+            handlerUpdateUI.post(pendingAutoNextRunnable);
         }
-    }
-
-    @Override
-    protected boolean useAudioCompletionWatchdog() {
-        return false;
     }
 
     @Override
@@ -262,6 +296,8 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         if (audioFiles == null || audioFiles.size() == 0) {
             return;
         }
+        cancelPendingAutoNext();
+        currentTrackGeneration++;
         if (currentPlayResIndex < 0) {
             currentPlayResIndex = audioFiles.size() - 1;
         }
@@ -270,6 +306,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         }
         currentPlayMediaPos = Math.max(0, mediaPos);
         if (progressBar != null) {
+            progressBar.setMax(0);
             progressBar.setProgress(currentPlayMediaPos);
         }
         String audioFileName = audioFiles.get(currentPlayResIndex);
@@ -281,11 +318,18 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         saveCurrentPlaybackState();
     }
 
+    private void cancelPendingAutoNext() {
+        if (pendingAutoNextRunnable != null) {
+            handlerUpdateUI.removeCallbacks(pendingAutoNextRunnable);
+            pendingAutoNextRunnable = null;
+        }
+    }
+
     @Override
     protected void saveCurrentPlaybackState() {
         if (audioFiles == null || audioFiles.size() == 0 || currentFolderPath == null) return;
         if (currentPlayResIndex < 0 || currentPlayResIndex >= audioFiles.size()) return;
-        if (mediaPlayer != null) {
+        if (mediaPlayer != null && isAudioPrepared()) {
             try {
                 currentPlayMediaPos = mediaPlayer.getCurrentPosition();
             } catch (Exception e) {
@@ -394,6 +438,13 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
         showPageInfo();
     }
 
+    @Override
+    protected void release() {
+        cancelPendingAutoNext();
+        handlerUpdateUI.removeCallbacks(hideControlsAfterTimeout);
+        super.release();
+    }
+
     private void showPageInfo() {
         if (audioFiles == null || audioFiles.size() == 0 || currentPlayResIndex < 0 || currentPlayResIndex >= audioFiles.size()) {
             return;
@@ -433,7 +484,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
     }
 
     private void seekBy(int deltaMs) {
-        if (mediaPlayer == null) return;
+        if (mediaPlayer == null || !isAudioPrepared()) return;
         try {
             int duration = mediaPlayer.getDuration();
             int position = mediaPlayer.getCurrentPosition();
@@ -498,7 +549,7 @@ public class PlayAudioActivity extends PlayBaseActivity implements View.OnClickL
 
     private void updateProgressText() {
         int duration = 0;
-        if (mediaPlayer != null) {
+        if (mediaPlayer != null && isAudioPrepared()) {
             try {
                 duration = mediaPlayer.getDuration();
             } catch (Exception e) {

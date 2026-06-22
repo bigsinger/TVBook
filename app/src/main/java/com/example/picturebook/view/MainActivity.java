@@ -857,8 +857,11 @@ public class MainActivity extends Activity implements View.OnClickListener, View
                 if (focus.getParent() == viewSubMenu && focus.getTag() instanceof ContentEntry) {
                     ContentEntry entry = (ContentEntry) focus.getTag();
                     if (entry.directory && entry.directoryDepth == 2) {
-                        openDirectoryEntry(entry, true);
-                        return true;
+                        List<String> childNames = directoryTree.get(entry.path);
+                        if (childNames != null && !childNames.isEmpty()) {
+                            openDirectoryEntry(entry, true);
+                            return true;
+                        }
                     }
                 }
                 if (focus.getTag() instanceof ContentEntry && btnSyncCatalog != null) {

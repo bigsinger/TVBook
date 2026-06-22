@@ -283,7 +283,7 @@ public class PlayHuibenActivity extends PlayBaseActivity implements View.OnClick
     @Override
     protected void saveCurrentPlaybackState() {
         if (currentBookType == null || currentBookName == null) return;
-        if (mediaPlayer != null) {
+        if (mediaPlayer != null && isAudioPrepared()) {
             try {
                 currentPlayMediaPos = mediaPlayer.getCurrentPosition();
             } catch (Exception e) {

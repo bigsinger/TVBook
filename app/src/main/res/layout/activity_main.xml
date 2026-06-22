@@ -41,7 +41,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:paddingBottom="18dp"
-                android:text="TVBook   v1.8"
+                android:text="TVBook   v1.9"
                 android:textColor="#F0C040"
                 android:textSize="24sp"
                 android:textStyle="bold" />

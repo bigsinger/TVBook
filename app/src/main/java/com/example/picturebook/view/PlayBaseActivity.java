@@ -40,6 +40,7 @@ public abstract class PlayBaseActivity extends Activity {
     private int activeAudioStartPositionMs = 0;
     private long activeAudioStartedAtMs = 0;
     private Runnable audioCompletionWatchdog = null;
+    private boolean audioPrepared = false;
 
     // App当前状态
     protected  boolean isAppPaused = false;
@@ -129,6 +130,10 @@ public abstract class PlayBaseActivity extends Activity {
         return true;
     }
 
+    protected boolean isAudioPrepared() {
+        return audioPrepared;
+    }
+
     protected void focusPlaybackArea() {
         View decorView = getWindow().getDecorView();
         if (decorView != null) {
@@ -158,21 +163,26 @@ public abstract class PlayBaseActivity extends Activity {
 
     protected void release() {
         isAppPaused = true;
-        invalidateAudioRequest();
-        if (updateUI != null) {
-            handlerUpdateUI.removeCallbacks(updateUI);
-        }
-        if (mediaPlayer != null) {
+        boolean playerWasPrepared = audioPrepared;
+        if (mediaPlayer != null && playerWasPrepared) {
             try {
                 currentPlayMediaPos = mediaPlayer.getCurrentPosition();
             } catch (Exception e) {
                 currentPlayMediaPos = 0;
             }
+        }
+        invalidateAudioRequest();
+        if (updateUI != null) {
+            handlerUpdateUI.removeCallbacks(updateUI);
+        }
+        if (mediaPlayer != null) {
             saveCurrentPlaybackState();
-            try {
-                mediaPlayer.stop();
-            } catch (Exception e) {
-                e.printStackTrace();
+            if (playerWasPrepared) {
+                try {
+                    mediaPlayer.stop();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
             mediaPlayer.release();
             mediaPlayer = null;
@@ -345,7 +355,7 @@ public abstract class PlayBaseActivity extends Activity {
     }
 
     protected void pausePlay() {
-        if (mediaPlayer != null) {
+        if (mediaPlayer != null && audioPrepared) {
             if (mediaPlayer.isPlaying()) {
                 try {
                     currentPlayMediaPos = mediaPlayer.getCurrentPosition();
@@ -391,6 +401,7 @@ public abstract class PlayBaseActivity extends Activity {
 
     protected void playAudio(String audioFilePath) {
         final int requestSerial = ++audioRequestSerial;
+        audioPrepared = false;
         activeAudioRequestSerial = requestSerial;
         activeAudioCompletionDelivered = false;
         activeAudioDurationMs = 0;
@@ -425,6 +436,7 @@ public abstract class PlayBaseActivity extends Activity {
                     if (!isCurrentAudioRequest(requestSerial, mp)) {
                         return;
                     }
+                    audioPrepared = true;
                     int duration = mp.getDuration();
                     if (currentPlayMediaPos > 0 && currentPlayMediaPos < duration - MIN_RESUME_REMAINING_MS) {
                         mp.seekTo(currentPlayMediaPos);
@@ -446,6 +458,28 @@ public abstract class PlayBaseActivity extends Activity {
                 @Override
                 public void onCompletion(MediaPlayer mp) {
                     handleAudioCompletion(requestSerial, mp);
+                }
+            });
+
+            player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                @Override
+                public boolean onError(final MediaPlayer mp, int what, int extra) {
+                    if (!isCurrentAudioRequest(requestSerial, mp)) {
+                        return true;
+                    }
+                    audioPrepared = false;
+                    handlerUpdateUI.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (!isCurrentAudioRequest(requestSerial, mp)) {
+                                return;
+                            }
+                            stopAndReleaseMediaPlayer();
+                            Toast.makeText(PlayBaseActivity.this, "音频无法播放，已跳过", Toast.LENGTH_SHORT).show();
+                            deliverAudioCompletion(requestSerial);
+                        }
+                    });
+                    return true;
                 }
             });
 
@@ -546,6 +580,7 @@ public abstract class PlayBaseActivity extends Activity {
 
     private void invalidateAudioRequest() {
         activeAudioRequestSerial = ++audioRequestSerial;
+        audioPrepared = false;
         activeAudioCompletionDelivered = true;
         activeAudioDurationMs = 0;
         activeAudioStartPositionMs = 0;
@@ -555,6 +590,8 @@ public abstract class PlayBaseActivity extends Activity {
 
     private void stopAndReleaseMediaPlayer() {
         MediaPlayer player = mediaPlayer;
+        boolean playerWasPrepared = audioPrepared;
+        audioPrepared = false;
         mediaPlayer = null;
         if (player == null) {
             return;
@@ -562,7 +599,8 @@ public abstract class PlayBaseActivity extends Activity {
         try {
             player.setOnPreparedListener(null);
             player.setOnCompletionListener(null);
-            if (player.isPlaying()) {
+            player.setOnErrorListener(null);
+            if (playerWasPrepared && player.isPlaying()) {
                 player.stop();
             }
         } catch (Exception e) {
