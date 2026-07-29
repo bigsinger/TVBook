@@ -224,6 +224,51 @@ public class TvBookStore {
         return storeProperties(context, CATALOG_FILE, props, "TVBook catalog");
     }
 
+    public static synchronized boolean saveCatalogCounts(Context context, String type,
+                                                         Map<String, Integer> counts) {
+        Properties props = loadProperties(context, CATALOG_FILE);
+        String pathListKey = "count.paths." + safe(type);
+        List<String> oldPaths = splitNames(props.getProperty(pathListKey));
+        for (String oldPath : oldPaths) {
+            if (".".equals(oldPath)) oldPath = "";
+            String oldKey = catalogKey(type, oldPath);
+            props.remove(oldKey + ".count");
+            props.remove(oldKey + ".names");
+            props.remove(oldKey + ".updatedAt");
+        }
+
+        List<String> paths = new ArrayList<String>();
+        long updatedAt = System.currentTimeMillis();
+        if (counts != null) {
+            for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+                String path = normalizePath(entry.getKey());
+                int count = entry.getValue() == null ? 0 : Math.max(0, entry.getValue());
+                String key = catalogKey(type, path);
+                props.setProperty(key + ".count", Integer.toString(count));
+                props.remove(key + ".names");
+                props.setProperty(key + ".updatedAt", Long.toString(updatedAt));
+                paths.add(path.length() == 0 ? "." : path);
+            }
+        }
+        props.setProperty(pathListKey, joinNames(paths));
+        return storeProperties(context, CATALOG_FILE, props, "TVBook catalog counts");
+    }
+
+    public static synchronized Map<String, Integer> readCatalogCountMap(Context context, String type) {
+        Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+        Properties props = loadProperties(context, CATALOG_FILE);
+        List<String> paths = splitNames(props.getProperty("count.paths." + safe(type)));
+        if (paths.isEmpty()) {
+            paths = splitNames(props.getProperty("tree.paths." + safe(type)));
+        }
+        for (String storedPath : paths) {
+            String path = ".".equals(storedPath) ? "" : normalizePath(storedPath);
+            String key = catalogKey(type, path);
+            counts.put(path, parseIntValue(props.getProperty(key + ".count"), 0));
+        }
+        return counts;
+    }
+
     public static String normalizePath(String path) {
         if (path == null) return "";
         path = path.replace("\\", "/").trim();

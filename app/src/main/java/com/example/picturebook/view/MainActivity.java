@@ -64,8 +64,14 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     private long exitTime = 0;
     private boolean isCatalogSyncing = false;
     private int activeMenuDepth = 1;
-    private final Map<String, List<String>> directoryTree = new LinkedHashMap<String, List<String>>();
-    private String selectedSecondLevelPath;
+    private int directoryLoadSerial = 0;
+    private final Map<String, Integer> audioCountCache = new LinkedHashMap<String, Integer>();
+    private final Map<String, Integer> bookCountCache = new LinkedHashMap<String, Integer>();
+    private final Map<String, Integer> directoryCountCache = new LinkedHashMap<String, Integer>();
+    private final List<DirectoryState> directoryBackStack = new ArrayList<DirectoryState>();
+    private String currentDirectoryPath = "";
+    private String currentDirectoryTitle = "";
+    private int currentDirectoryDepth = 1;
 
     private final List<MenuEntry> menuEntries = new ArrayList<MenuEntry>();
     private MenuEntry currentMenuEntry;
@@ -128,6 +134,38 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         }
     }
 
+    private static class DirectoryState {
+        final String path;
+        final String title;
+        final int depth;
+        final String focusPath;
+
+        DirectoryState(String path, String title, int depth, String focusPath) {
+            this.path = path;
+            this.title = title;
+            this.depth = depth;
+            this.focusPath = focusPath;
+        }
+    }
+
+    private static class DirectoryListing {
+        boolean exists;
+        String error;
+        List<String> names = new ArrayList<String>();
+    }
+
+    private static class CatalogScanResult {
+        int visitedDirectories;
+        int directImageCount;
+        int directAudioCount;
+
+        CatalogScanResult(int visitedDirectories, int directImageCount, int directAudioCount) {
+            this.visitedDirectories = visitedDirectories;
+            this.directImageCount = directImageCount;
+            this.directAudioCount = directAudioCount;
+        }
+    }
+
     public static void verifyStoragePermissions(Activity activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             int permission = activity.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE);
@@ -180,6 +218,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         menuEntries.clear();
         viewMenu.removeAllViews();
         viewSubMenu.removeAllViews();
+        directoryBackStack.clear();
+        directoryLoadSerial++;
+        refreshCatalogCountCache();
 
         menuEntries.add(new MenuEntry("我的收藏", "favorite_root", "", true, false));
 
@@ -191,18 +232,24 @@ public class MainActivity extends Activity implements View.OnClickListener, View
             return;
         }
 
-        directoryTree.clear();
-        directoryTree.putAll(TvBookStore.readCatalogTree(this, TvBookStore.TYPE_DIRECTORY));
-        List<String> rootDirectories = directoryTree.get("");
-        if (rootDirectories == null) rootDirectories = new ArrayList<String>();
+        List<String> rootDirectories = listDirectoryNames(rootDir, true);
         for (String name : rootDirectories) {
             menuEntries.add(new MenuEntry(name, TvBookStore.TYPE_DIRECTORY, name, false, false));
         }
         menuEntries.add(new MenuEntry("H5 在线绘本", "h5", "", false, true));
         renderMenu();
         if (rootDirectories.isEmpty()) {
-            Toast.makeText(this, "尚未同步目录，请点击右侧同步按钮", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "tvbooks 目录下暂无内容目录", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void refreshCatalogCountCache() {
+        audioCountCache.clear();
+        audioCountCache.putAll(TvBookStore.readCatalogCountMap(this, TvBookStore.TYPE_AUDIO));
+        bookCountCache.clear();
+        bookCountCache.putAll(TvBookStore.readCatalogCountMap(this, TvBookStore.TYPE_AUDIO_IMAGE));
+        directoryCountCache.clear();
+        directoryCountCache.putAll(TvBookStore.readCatalogCountMap(this, TvBookStore.TYPE_DIRECTORY));
     }
 
     private void renderMenu() {
@@ -218,7 +265,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
                 currentMenuEntry = entry;
                 button.setSelected(true);
                 button.setTextColor(Color.rgb(240, 192, 64));
-                renderContent(entry);
+                renderContent(entry, false);
                 final Button firstButton = button;
                 firstButton.post(new Runnable() {
                     @Override
@@ -232,17 +279,23 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     }
 
     private void renderContent(MenuEntry entry) {
+        renderContent(entry, false);
+    }
+
+    private void renderContent(MenuEntry entry, boolean focusAfterRender) {
         currentMenuEntry = entry;
         showingFavoriteList = false;
-        clearSubMenuViews();
         updateMenuPanelLayout(2);
 
         if (entry != null && TvBookStore.TYPE_DIRECTORY.equals(entry.type)) {
-            renderDirectoryLevel(entry.path, entry.title, 2, viewSubMenu);
+            directoryBackStack.clear();
+            loadDirectoryLevel(entry.path, entry.title, 2, focusAfterRender, null);
             refreshStatusText(entry);
             return;
         }
 
+        directoryLoadSerial++;
+        clearSubMenuViews();
         List<ContentEntry> contentEntries = buildContentEntries(entry);
         txtSectionTitle.setText(entry == null ? "内容" : entry.title);
         txtSectionCount.setText(contentEntries.size() + " 项");
@@ -267,47 +320,107 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         String error;
     }
 
-    private void renderDirectoryLevel(String parentPath, String title, int childDepth,
-                                      LinearLayout target) {
-        List<String> names = directoryTree.get(parentPath);
-        if (names == null) names = new ArrayList<String>();
-        showDirectoryLevel(parentPath, title, childDepth, target, names);
+    private void loadDirectoryLevel(final String parentPath, final String title, final int childDepth,
+                                    final boolean focusAfterRender, final String focusPath) {
+        final String safePath = TvBookStore.normalizePath(parentPath);
+        final int serial = ++directoryLoadSerial;
+        currentDirectoryPath = safePath;
+        currentDirectoryTitle = title;
+        currentDirectoryDepth = childDepth;
+        showDirectoryLoading(title);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final DirectoryListing listing = readDirectoryListing(safePath);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (serial != directoryLoadSerial) return;
+                        if (listing.error != null) {
+                            clearSubMenuViews();
+                            txtSectionTitle.setText(title);
+                            txtSectionCount.setText("0 项");
+                            addEmptyContent(viewSubMenu, listing.error);
+                            return;
+                        }
+                        showDirectoryLevel(safePath, title, childDepth, viewSubMenu, listing.names,
+                                focusAfterRender, focusPath);
+                    }
+                });
+            }
+        }).start();
     }
 
     private void showDirectoryLevel(String parentPath, String title, int childDepth,
-                                    LinearLayout target, List<String> names) {
+                                    LinearLayout target, List<String> names,
+                                    boolean focusAfterRender, String focusPath) {
         suppressMenuFocusRender = true;
         try {
+            showingFavoriteList = false;
+            currentDirectoryPath = TvBookStore.normalizePath(parentPath);
+            currentDirectoryTitle = title;
+            currentDirectoryDepth = childDepth;
             target.removeAllViews();
             txtSectionTitle.setText(title);
-            txtSectionCount.setText(names.size() + " 项");
-            if (childDepth == 2) {
+            txtSectionCount.setText(names.size() + " 个目录");
+            if (currentDirectoryPath.length() > 0) {
                 addDirectoryFavoriteGroup(target, parentPath);
             }
 
             if (names.isEmpty()) {
-                ContentEntry playCurrent = new ContentEntry("播放当前目录", "未发现下级目录", TvBookStore.TYPE_DIRECTORY,
-                        parentPath, null, false, null, false, null, null, true, 3);
+                ContentEntry playCurrent = new ContentEntry("播放当前目录", buildPlayCurrentSubtitle(parentPath),
+                        TvBookStore.TYPE_DIRECTORY, parentPath, null, false, null, false, null, null,
+                        true, childDepth);
                 target.addView(createContentView(playCurrent));
             } else {
                 for (String name : names) {
                     String path = parentPath.length() == 0 ? name : parentPath + "/" + name;
-                    String subtitle = "直接播放";
-                    if (childDepth < 3) {
-                        List<String> childNames = directoryTree.get(path);
-                        if (childNames != null && !childNames.isEmpty()) {
-                            subtitle = "打开下级目录";
-                        }
-                    }
+                    String subtitle = buildDirectorySubtitle(path);
                     ContentEntry child = new ContentEntry(name, subtitle, TvBookStore.TYPE_DIRECTORY, path,
                             null, false, null, false, null, null, true, childDepth);
                     target.addView(createContentView(child));
                 }
             }
             lockVerticalFocus(target);
+            if (focusPath != null && focusContentByPath(focusPath)) {
+                return;
+            }
+            if (focusAfterRender) {
+                focusFirstContent();
+            }
         } finally {
             suppressMenuFocusRender = false;
         }
+    }
+
+    private void showDirectoryLoading(String title) {
+        suppressMenuFocusRender = true;
+        try {
+            viewSubMenu.removeAllViews();
+            txtSectionTitle.setText(title);
+            txtSectionCount.setText("读取中");
+            addEmptyContent(viewSubMenu, "正在读取目录...");
+        } finally {
+            suppressMenuFocusRender = false;
+        }
+    }
+
+    private DirectoryListing readDirectoryListing(String relativePath) {
+        DirectoryListing listing = new DirectoryListing();
+        File rootDir = Settings.getRootDir(this);
+        if (rootDir == null) {
+            listing.error = "请插入包含 tvbooks 的U盘";
+            return listing;
+        }
+        File directory = new File(rootDir, TvBookStore.normalizePath(relativePath));
+        if (!directory.isDirectory()) {
+            listing.error = "目录不存在";
+            return listing;
+        }
+        listing.names = listDirectoryNames(directory, relativePath.length() == 0);
+        listing.exists = true;
+        return listing;
     }
 
     private void addDirectoryFavoriteGroup(LinearLayout target, String scopePath) {
@@ -377,6 +490,48 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         return "内容 · " + path;
     }
 
+    private String buildDirectorySubtitle(String path) {
+        Integer childDirectoryCount = directoryCountCache.get(TvBookStore.normalizePath(path));
+        String action = childDirectoryCount != null && childDirectoryCount == 0
+                ? "OK 播放"
+                : "OK 进入 / 播放";
+        String countText = buildCachedMediaCountText(path);
+        if (countText.length() > 0) {
+            return action + " · " + countText;
+        }
+        if (childDirectoryCount != null && childDirectoryCount > 0) {
+            return action + " · " + childDirectoryCount + " 个目录";
+        }
+        return action;
+    }
+
+    private String buildPlayCurrentSubtitle(String path) {
+        String countText = buildCachedMediaCountText(path);
+        return countText.length() > 0
+                ? "OK 播放当前目录 · " + countText
+                : "OK 播放当前目录";
+    }
+
+    private String buildCachedMediaCountText(String path) {
+        String safePath = TvBookStore.normalizePath(path);
+        List<String> parts = new ArrayList<String>();
+        Integer bookCount = bookCountCache.get(safePath);
+        if (bookCount != null && bookCount > 0) {
+            parts.add(bookCount + " 本");
+        }
+        Integer audioCount = audioCountCache.get(safePath);
+        if (audioCount != null && audioCount > 0) {
+            parts.add(audioCount + " 首");
+        }
+        if (parts.isEmpty()) return "";
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) builder.append(" / ");
+            builder.append(parts.get(i));
+        }
+        return builder.toString();
+    }
+
     private void addEmptyContent(String text) {
         addEmptyContent(viewSubMenu, text);
     }
@@ -406,8 +561,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         Object tag = v.getTag();
         if (tag instanceof MenuEntry) {
             selectMenuButton(v);
-            renderContent((MenuEntry) tag);
-            focusFirstContent();
+            renderContent((MenuEntry) tag, true);
             return;
         }
         if (tag instanceof ContentEntry) {
@@ -444,20 +598,38 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     }
 
     private void openDirectoryEntry(final ContentEntry entry, final boolean focusThirdLevel) {
-        if (entry.directoryDepth >= 3) {
-            launchDirectory(entry.path);
-            return;
-        }
-        List<String> childNames = directoryTree.get(entry.path);
-        if (childNames == null || childNames.isEmpty()) {
-            launchDirectory(entry.path);
-            return;
-        }
+        final String safePath = TvBookStore.normalizePath(entry.path);
+        final DirectoryState previousState = new DirectoryState(
+                currentDirectoryPath, currentDirectoryTitle, currentDirectoryDepth, safePath);
+        final int nextDepth = Math.max(currentDirectoryDepth + 1, entry.directoryDepth + 1);
+        final int serial = ++directoryLoadSerial;
+        txtSectionCount.setText("读取中");
 
-        selectedSecondLevelPath = entry.path;
-        showDirectoryLevel(entry.path, entry.title, 3, viewSubMenu, childNames);
-        updateMenuPanelLayout(3);
-        if (focusThirdLevel) focusFirstContent();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final DirectoryListing listing = readDirectoryListing(safePath);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (serial != directoryLoadSerial) return;
+                        if (listing.error != null) {
+                            Toast.makeText(MainActivity.this, listing.error, Toast.LENGTH_SHORT).show();
+                            txtSectionCount.setText("-");
+                            return;
+                        }
+                        if (listing.names == null || listing.names.isEmpty()) {
+                            launchDirectory(safePath);
+                            return;
+                        }
+                        directoryBackStack.add(previousState);
+                        showDirectoryLevel(safePath, entry.title, nextDepth, viewSubMenu, listing.names,
+                                focusThirdLevel, null);
+                        updateMenuPanelLayout(2);
+                    }
+                });
+            }
+        }).start();
     }
 
     private void launchDirectory(final String relativePath) {
@@ -602,21 +774,73 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     private int syncCatalogInBackground() {
         File rootDir = Settings.getRootDir(this);
         if (rootDir == null) return 0;
-        Map<String, List<String>> tree = new LinkedHashMap<String, List<String>>();
-        List<String> levelOne = listDirectoryNames(rootDir, true);
-        tree.put("", levelOne);
-        for (String levelOneName : levelOne) {
-            File levelOneDir = new File(rootDir, levelOneName);
-            List<String> levelTwo = listDirectoryNames(levelOneDir, false);
-            tree.put(levelOneName, levelTwo);
-            for (String levelTwoName : levelTwo) {
-                String levelTwoPath = levelOneName + "/" + levelTwoName;
-                List<String> levelThree = listDirectoryNames(new File(rootDir, levelTwoPath), false);
-                tree.put(levelTwoPath, levelThree);
+        Map<String, Integer> audioCounts = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> bookCounts = new LinkedHashMap<String, Integer>();
+        Map<String, Integer> directoryCounts = new LinkedHashMap<String, Integer>();
+        CatalogScanResult result = scanCatalogCounts(rootDir, "", true, audioCounts, bookCounts, directoryCounts);
+        TvBookStore.saveCatalogCounts(this, TvBookStore.TYPE_AUDIO, audioCounts);
+        TvBookStore.saveCatalogCounts(this, TvBookStore.TYPE_AUDIO_IMAGE, bookCounts);
+        TvBookStore.saveCatalogCounts(this, TvBookStore.TYPE_DIRECTORY, directoryCounts);
+        return result.visitedDirectories;
+    }
+
+    private CatalogScanResult scanCatalogCounts(File directory, String relativePath, boolean excludeConfig,
+                                                Map<String, Integer> audioCounts,
+                                                Map<String, Integer> bookCounts,
+                                                Map<String, Integer> directoryCounts) {
+        if (directory == null || !directory.isDirectory()) {
+            return new CatalogScanResult(0, 0, 0);
+        }
+
+        File[] files = directory.listFiles();
+        if (files == null) {
+            return new CatalogScanResult(1, 0, 0);
+        }
+
+        List<File> childDirectories = new ArrayList<File>();
+        int directAudioCount = 0;
+        int directImageCount = 0;
+        for (File file : files) {
+            if (file.isDirectory()) {
+                String name = file.getName();
+                if (shouldSkipDirectoryName(name, excludeConfig)) continue;
+                childDirectories.add(file);
+            } else {
+                String name = file.getName().toLowerCase();
+                if (isAudioFileName(name)) {
+                    directAudioCount++;
+                } else if (isImageFileName(name)) {
+                    directImageCount++;
+                }
             }
         }
-        TvBookStore.saveCatalogTree(this, TvBookStore.TYPE_DIRECTORY, tree);
-        return tree.size();
+
+        Collections.sort(childDirectories, new java.util.Comparator<File>() {
+            @Override
+            public int compare(File left, File right) {
+                return left.getName().compareToIgnoreCase(right.getName());
+            }
+        });
+
+        int visitedDirectories = 1;
+        int directBookDirectoryCount = 0;
+        for (File childDirectory : childDirectories) {
+            String childPath = relativePath.length() == 0
+                    ? childDirectory.getName()
+                    : relativePath + "/" + childDirectory.getName();
+            CatalogScanResult childResult = scanCatalogCounts(childDirectory, childPath, false,
+                    audioCounts, bookCounts, directoryCounts);
+            visitedDirectories += childResult.visitedDirectories;
+            if (childResult.directImageCount > 0) {
+                directBookDirectoryCount++;
+            }
+        }
+
+        String safePath = TvBookStore.normalizePath(relativePath);
+        directoryCounts.put(safePath, childDirectories.size());
+        audioCounts.put(safePath, directAudioCount);
+        bookCounts.put(safePath, directImageCount > 0 ? 1 : directBookDirectoryCount);
+        return new CatalogScanResult(visitedDirectories, directImageCount, directAudioCount);
     }
 
     private List<String> listDirectoryNames(File directory, boolean excludeConfig) {
@@ -627,12 +851,17 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         for (File file : files) {
             if (!file.isDirectory()) continue;
             String name = file.getName();
-            if (excludeConfig && "config".equalsIgnoreCase(name)) continue;
-            if (name.startsWith(".")) continue;
+            if (shouldSkipDirectoryName(name, excludeConfig)) continue;
             names.add(name);
         }
         Collections.sort(names, String.CASE_INSENSITIVE_ORDER);
         return names;
+    }
+
+    private boolean shouldSkipDirectoryName(String name, boolean excludeConfig) {
+        if (name == null || name.length() == 0) return true;
+        if (excludeConfig && "config".equalsIgnoreCase(name)) return true;
+        return name.startsWith(".");
     }
 
     @Override
@@ -665,7 +894,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     }
 
     private void updateMenuPanelLayout(final int depth) {
-        activeMenuDepth = Math.max(1, Math.min(3, depth));
+        activeMenuDepth = Math.max(1, Math.min(2, depth));
     }
 
     private void selectMenuButton(View selectedView) {
@@ -729,6 +958,7 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     }
 
     private void renderFavoriteList(String type, String scopePath) {
+        directoryLoadSerial++;
         showingFavoriteList = true;
         clearSubMenuViews();
         updateMenuPanelLayout(2);
@@ -854,25 +1084,15 @@ public class MainActivity extends Activity implements View.OnClickListener, View
                     focusFirstContent();
                     return true;
                 }
-                if (focus.getParent() == viewSubMenu && focus.getTag() instanceof ContentEntry) {
-                    ContentEntry entry = (ContentEntry) focus.getTag();
-                    if (entry.directory && entry.directoryDepth == 2) {
-                        List<String> childNames = directoryTree.get(entry.path);
-                        if (childNames != null && !childNames.isEmpty()) {
-                            openDirectoryEntry(entry, true);
-                            return true;
-                        }
-                    }
-                }
                 if (focus.getTag() instanceof ContentEntry && btnSyncCatalog != null) {
                     btnSyncCatalog.requestFocus();
                     return true;
                 }
             } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                if (activeMenuDepth == 3 && focus != null && focus.getParent() == viewSubMenu) {
-                    return closeThirdMenuAndFocusSecond();
-                }
                 if (focus != null && focus.getParent() == viewSubMenu) {
+                    if (navigateBackInDirectory()) {
+                        return true;
+                    }
                     updateMenuPanelLayout(1);
                     return focusSelectedMenu();
                 }
@@ -907,12 +1127,17 @@ public class MainActivity extends Activity implements View.OnClickListener, View
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_DOWN) {
             if (showingFavoriteList) {
-                renderContent(currentMenuEntry);
-                focusFirstContent();
+                showingFavoriteList = false;
+                if (currentMenuEntry != null && TvBookStore.TYPE_DIRECTORY.equals(currentMenuEntry.type)) {
+                    loadDirectoryLevel(currentDirectoryPath, currentDirectoryTitle, currentDirectoryDepth,
+                            true, null);
+                } else {
+                    renderContent(currentMenuEntry, true);
+                }
                 return true;
             }
-            if (activeMenuDepth == 3) {
-                return closeThirdMenuAndFocusSecond();
+            if (navigateBackInDirectory()) {
+                return true;
             }
             if (activeMenuDepth == 2) {
                 updateMenuPanelLayout(1);
@@ -937,6 +1162,9 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
             View focus = getCurrentFocus();
             if (focus != null && focus.getTag() instanceof ContentEntry) {
+                if (navigateBackInDirectory()) {
+                    return true;
+                }
                 return focusSelectedMenu();
             }
         }
@@ -944,22 +1172,27 @@ public class MainActivity extends Activity implements View.OnClickListener, View
         return super.onKeyDown(keyCode, event);
     }
 
-    private boolean closeThirdMenuAndFocusSecond() {
-        String pathToRestore = selectedSecondLevelPath;
+    private boolean navigateBackInDirectory() {
+        if (directoryBackStack.isEmpty()) {
+            return false;
+        }
+        DirectoryState state = directoryBackStack.remove(directoryBackStack.size() - 1);
         updateMenuPanelLayout(2);
-        if (currentMenuEntry != null && TvBookStore.TYPE_DIRECTORY.equals(currentMenuEntry.type)) {
-            renderDirectoryLevel(currentMenuEntry.path, currentMenuEntry.title, 2, viewSubMenu);
-            for (int i = 0; i < viewSubMenu.getChildCount(); i++) {
-                View child = viewSubMenu.getChildAt(i);
-                Object tag = child.getTag();
-                if (tag instanceof ContentEntry && pathToRestore != null
-                        && pathToRestore.equals(((ContentEntry) tag).path)) {
-                    child.requestFocus();
-                    return true;
-                }
+        loadDirectoryLevel(state.path, state.title, state.depth, true, state.focusPath);
+        return true;
+    }
+
+    private boolean focusContentByPath(String path) {
+        String safePath = TvBookStore.normalizePath(path);
+        for (int i = 0; i < viewSubMenu.getChildCount(); i++) {
+            View child = viewSubMenu.getChildAt(i);
+            Object tag = child.getTag();
+            if (tag instanceof ContentEntry && safePath.equals(((ContentEntry) tag).path)) {
+                child.requestFocus();
+                return true;
             }
         }
-        return focusFirstContent();
+        return false;
     }
 
     private String getAndroidSDKVersion() {
